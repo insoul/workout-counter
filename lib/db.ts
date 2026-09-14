@@ -1,4 +1,4 @@
-import { createClient, type Client } from '@libsql/client';
+import { neon, type NeonQueryFunction } from '@neondatabase/serverless';
 import type { RoutineItem } from '@/lib/routine/custom';
 
 export interface RoutineRecord {
@@ -8,46 +8,45 @@ export interface RoutineRecord {
   updatedAt: number;
 }
 
-let client: Client | null = null;
+// Neon HTTP 드라이버 — 커넥션 풀 없이 요청마다 HTTP로 질의한다 (서버리스 함수에 맞춤).
+// DATABASE_URL 은 Vercel의 Neon 마켓플레이스 연동이 주입한다.
+let sql: NeonQueryFunction<false, false> | null = null;
 let schemaReady: Promise<unknown> | null = null;
 
 export function dbAvailable(): boolean {
-  return !!process.env.TURSO_DATABASE_URL;
+  return !!process.env.DATABASE_URL;
 }
 
-function getClient(): Client {
-  client ??= createClient({
-    url: process.env.TURSO_DATABASE_URL!,
-    authToken: process.env.TURSO_AUTH_TOKEN,
-  });
-  return client;
+function db(): NeonQueryFunction<false, false> {
+  sql ??= neon(process.env.DATABASE_URL!);
+  return sql;
 }
 
 async function ensureSchema() {
-  schemaReady ??= getClient().batch(
-    [
-      `CREATE TABLE IF NOT EXISTS user_routines (
-         id TEXT PRIMARY KEY,
-         user_id TEXT NOT NULL,
-         name TEXT NOT NULL,
-         items TEXT NOT NULL,
-         created_at INTEGER NOT NULL,
-         updated_at INTEGER NOT NULL
-       )`,
-      `CREATE INDEX IF NOT EXISTS idx_user_routines_user
-         ON user_routines(user_id, updated_at DESC)`,
-    ],
-    'write',
-  );
+  schemaReady ??= (async () => {
+    const q = db();
+    await q`CREATE TABLE IF NOT EXISTS user_routines (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      items JSONB NOT NULL,
+      created_at BIGINT NOT NULL,
+      updated_at BIGINT NOT NULL
+    )`;
+    await q`CREATE INDEX IF NOT EXISTS idx_user_routines_user
+      ON user_routines(user_id, updated_at DESC)`;
+  })();
   await schemaReady;
 }
 
 function toRecord(row: Record<string, unknown>): RoutineRecord | null {
   try {
+    const raw = row.items;
+    const items = (typeof raw === 'string' ? JSON.parse(raw) : raw) as RoutineItem[];
     return {
       id: String(row.id),
       name: String(row.name),
-      items: JSON.parse(String(row.items)) as RoutineItem[],
+      items,
       updatedAt: Number(row.updated_at),
     };
   } catch {
@@ -55,60 +54,26 @@ function toRecord(row: Record<string, unknown>): RoutineRecord | null {
   }
 }
 
-/** 구버전 단일 루틴 테이블(routines)에서 1회성 이관 */
-async function migrateLegacy(userId: string): Promise<void> {
-  try {
-    const rs = await getClient().execute({
-      sql: 'SELECT items FROM routines WHERE user_id = ?',
-      args: [userId],
-    });
-    const row = rs.rows[0];
-    if (!row) return;
-    const now = Date.now();
-    await getClient().batch(
-      [
-        {
-          sql: `INSERT INTO user_routines (id, user_id, name, items, created_at, updated_at)
-                VALUES (?, ?, ?, ?, ?, ?)`,
-          args: [crypto.randomUUID(), userId, '내 루틴', String(row.items), now, now],
-        },
-        { sql: 'DELETE FROM routines WHERE user_id = ?', args: [userId] },
-      ],
-      'write',
-    );
-  } catch {
-    // 구 테이블이 없으면 정상 — 이관할 것 없음
-  }
-}
-
-/** 최신순 목록. 비어 있으면 구버전 데이터 이관을 시도한다 */
+/** 최신순 목록 */
 export async function listRoutines(userId: string): Promise<RoutineRecord[]> {
   if (!dbAvailable()) return [];
   await ensureSchema();
-  const query = {
-    sql: `SELECT id, name, items, updated_at FROM user_routines
-          WHERE user_id = ? ORDER BY updated_at DESC`,
-    args: [userId],
-  };
-  let rs = await getClient().execute(query);
-  if (!rs.rows.length) {
-    await migrateLegacy(userId);
-    rs = await getClient().execute(query);
-  }
-  return rs.rows
-    .map((r) => toRecord(r as unknown as Record<string, unknown>))
+  const rows = await db()`
+    SELECT id, name, items, updated_at FROM user_routines
+    WHERE user_id = ${userId} ORDER BY updated_at DESC`;
+  return rows
+    .map((r) => toRecord(r as Record<string, unknown>))
     .filter((r): r is RoutineRecord => r !== null);
 }
 
 export async function getRoutine(userId: string, id: string): Promise<RoutineRecord | null> {
   if (!dbAvailable()) return null;
   await ensureSchema();
-  const rs = await getClient().execute({
-    sql: `SELECT id, name, items, updated_at FROM user_routines WHERE user_id = ? AND id = ?`,
-    args: [userId, id],
-  });
-  const row = rs.rows[0];
-  return row ? toRecord(row as unknown as Record<string, unknown>) : null;
+  const rows = await db()`
+    SELECT id, name, items, updated_at FROM user_routines
+    WHERE user_id = ${userId} AND id = ${id}`;
+  const row = rows[0];
+  return row ? toRecord(row as Record<string, unknown>) : null;
 }
 
 export async function createRoutine(
@@ -119,11 +84,9 @@ export async function createRoutine(
   await ensureSchema();
   const id = crypto.randomUUID();
   const now = Date.now();
-  await getClient().execute({
-    sql: `INSERT INTO user_routines (id, user_id, name, items, created_at, updated_at)
-          VALUES (?, ?, ?, ?, ?, ?)`,
-    args: [id, userId, name, JSON.stringify(items), now, now],
-  });
+  await db()`
+    INSERT INTO user_routines (id, user_id, name, items, created_at, updated_at)
+    VALUES (${id}, ${userId}, ${name}, ${JSON.stringify(items)}::jsonb, ${now}, ${now})`;
   return id;
 }
 
@@ -134,18 +97,15 @@ export async function updateRoutine(
   items: RoutineItem[],
 ): Promise<boolean> {
   await ensureSchema();
-  const rs = await getClient().execute({
-    sql: `UPDATE user_routines SET name = ?, items = ?, updated_at = ?
-          WHERE user_id = ? AND id = ?`,
-    args: [name, JSON.stringify(items), Date.now(), userId, id],
-  });
-  return rs.rowsAffected > 0;
+  const rows = await db()`
+    UPDATE user_routines
+    SET name = ${name}, items = ${JSON.stringify(items)}::jsonb, updated_at = ${Date.now()}
+    WHERE user_id = ${userId} AND id = ${id}
+    RETURNING id`;
+  return rows.length > 0;
 }
 
 export async function deleteRoutine(userId: string, id: string): Promise<void> {
   await ensureSchema();
-  await getClient().execute({
-    sql: 'DELETE FROM user_routines WHERE user_id = ? AND id = ?',
-    args: [userId, id],
-  });
+  await db()`DELETE FROM user_routines WHERE user_id = ${userId} AND id = ${id}`;
 }
