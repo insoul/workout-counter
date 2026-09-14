@@ -33,7 +33,7 @@ function NumberField({
           aria-label={`${label} 감소`}
           onClick={() => step(-1)}
           disabled={value <= min}
-          className="px-3 py-2 text-lg text-white disabled:opacity-30"
+          className="px-2.5 py-2 text-lg text-white disabled:opacity-30"
         >
           −
         </button>
@@ -47,14 +47,14 @@ function NumberField({
             const v = Math.round(Number(e.target.value));
             if (Number.isFinite(v)) onChange(Math.min(max, Math.max(min, v)));
           }}
-          className="w-12 bg-transparent py-2 text-center text-base font-semibold text-white [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          className="w-8 bg-transparent py-2 text-center text-base font-semibold text-white [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         />
         <button
           type="button"
           aria-label={`${label} 증가`}
           onClick={() => step(1)}
           disabled={value >= max}
-          className="px-3 py-2 text-lg text-white disabled:opacity-30"
+          className="px-2.5 py-2 text-lg text-white disabled:opacity-30"
         >
           +
         </button>
@@ -203,7 +203,7 @@ function RoutineBuilder() {
                   onChange={(e) =>
                     e.target.value && update(idx, { exerciseId: e.target.value as ExerciseId })
                   }
-                  className="flex-1 rounded-lg bg-white/10 px-3 py-2 font-bold text-white"
+                  className="min-w-0 flex-1 rounded-lg bg-white/10 px-3 py-2 font-bold text-white"
                 >
                   {EXERCISE_IDS.map((id) => (
                     <option key={id} value={id} className="bg-neutral-900">
@@ -215,26 +215,26 @@ function RoutineBuilder() {
                 <button
                   onClick={() => move(idx, -1)}
                   disabled={idx === 0}
-                  className="h-9 w-9 rounded-lg bg-white/10 disabled:opacity-30"
+                  className="h-9 w-9 shrink-0 rounded-lg bg-white/10 disabled:opacity-30"
                 >
                   ↑
                 </button>
                 <button
                   onClick={() => move(idx, 1)}
                   disabled={idx === items.length - 1}
-                  className="h-9 w-9 rounded-lg bg-white/10 disabled:opacity-30"
+                  className="h-9 w-9 shrink-0 rounded-lg bg-white/10 disabled:opacity-30"
                 >
                   ↓
                 </button>
                 <button
                   onClick={() => setItems((prev) => prev.filter((_, i) => i !== idx))}
                   disabled={items.length <= 1}
-                  className="h-9 w-9 rounded-lg bg-red-500/20 text-red-300 disabled:opacity-30"
+                  className="h-9 w-9 shrink-0 rounded-lg bg-red-500/20 text-red-300 disabled:opacity-30"
                 >
                   ✕
                 </button>
               </div>
-              <div className="flex flex-wrap items-end gap-3">
+              <div className="flex flex-wrap items-end gap-2">
                 <NumberField
                   label={meta.perSide ? '세트 (좌우 각)' : '세트'}
                   value={item.sets}
