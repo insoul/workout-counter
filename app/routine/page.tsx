@@ -33,7 +33,7 @@ function NumberField({
           aria-label={`${label} 감소`}
           onClick={() => step(-1)}
           disabled={value <= min}
-          className="px-2.5 py-2 text-lg text-white disabled:opacity-30"
+          className="w-8 py-2 text-lg leading-none text-white disabled:opacity-30"
         >
           −
         </button>
@@ -47,14 +47,14 @@ function NumberField({
             const v = Math.round(Number(e.target.value));
             if (Number.isFinite(v)) onChange(Math.min(max, Math.max(min, v)));
           }}
-          className="w-8 bg-transparent py-2 text-center text-base font-semibold text-white [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+          className="w-7 min-w-0 bg-transparent py-2 text-center text-base font-semibold text-white [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
         />
         <button
           type="button"
           aria-label={`${label} 증가`}
           onClick={() => step(1)}
           disabled={value >= max}
-          className="px-2.5 py-2 text-lg text-white disabled:opacity-30"
+          className="w-8 py-2 text-lg leading-none text-white disabled:opacity-30"
         >
           +
         </button>
@@ -234,7 +234,7 @@ function RoutineBuilder() {
                   ✕
                 </button>
               </div>
-              <div className="flex flex-wrap items-end gap-2">
+              <div className="grid grid-cols-3 gap-2">
                 <NumberField
                   label={meta.perSide ? '세트 (좌우 각)' : '세트'}
                   value={item.sets}
@@ -256,8 +256,8 @@ function RoutineBuilder() {
                   max={600}
                   onChange={(v) => update(idx, { restSec: v })}
                 />
-                <span className="ml-auto text-xs text-neutral-500">{meta.purposeKo}</span>
               </div>
+              <div className="mt-2 text-right text-xs text-neutral-500">{meta.purposeKo}</div>
             </div>
           );
         })}

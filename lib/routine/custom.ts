@@ -14,6 +14,7 @@ export const DEFAULT_ITEMS: RoutineItem[] = [
   { exerciseId: 'squat', sets: 3, value: 15, restSec: 60 },
   { exerciseId: 'pushup', sets: 3, value: 12, restSec: 60 },
   { exerciseId: 'row', sets: 3, value: 12, restSec: 60 },
+  { exerciseId: 'pullup', sets: 3, value: 5, restSec: 90 },
   { exerciseId: 'deadhang', sets: 3, value: 25, restSec: 60 },
   { exerciseId: 'plank', sets: 3, value: 40, restSec: 60 },
   { exerciseId: 'sideplank', sets: 2, value: 30, restSec: 30 },
