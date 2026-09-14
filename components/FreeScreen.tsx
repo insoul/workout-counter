@@ -16,7 +16,7 @@ import {
   type FreeLog,
 } from '@/lib/free/log';
 import { buildDebugBundle, shareDebugBundle } from '@/lib/free/debugBundle';
-import { captureSnapshot, type Snapshot } from '@/lib/free/snapshot';
+import { captureSnapshot, type Snapshot, type TraceRow } from '@/lib/free/snapshot';
 import { PoseEngine } from '@/lib/pose/engine';
 import { drawPose } from '@/lib/pose/draw';
 import { fullBodyCheck } from '@/lib/pose/fullBodyCheck';
@@ -62,6 +62,9 @@ const HOLD_MIN_MS = 10000;
 /** 프레임 루프에서 화면 갱신 최소 간격 */
 const UI_INTERVAL_MS = 250;
 
+/** 디버그 모드 추적 기록 간격 — 1분에 120줄, 묶음에 수십 KB */
+const TRACE_INTERVAL_MS = 500;
+
 interface HoldTrack {
   /** 이번 hold 에서 쌓인 ms (로그 반영 전 포함) */
   ms: number;
@@ -83,6 +86,8 @@ export default function FreeScreen() {
   const holdRef = useRef<Partial<Record<ExerciseId, HoldTrack>>>({});
   /** rep 디텍터별 "굽힘" 시점 증거 — 같은 rep 이 완성되면 구간에 붙이고 비운다 */
   const pendingBottomRef = useRef<Partial<Record<ExerciseId, Snapshot>>>({});
+  const traceRef = useRef<TraceRow[]>([]);
+  const lastTraceTRef = useRef(0);
   const lastMotionTRef = useRef(-Infinity);
   const lastFrameTRef = useRef<number | null>(null);
   const lastUiTRef = useRef(0);
@@ -98,7 +103,7 @@ export default function FreeScreen() {
   const [paused, setPaused] = useState(false);
   const [freeLog, setFreeLog] = useState<FreeLog>(EMPTY_LOG);
   const [saving, setSaving] = useState(false);
-  const [bundle, setBundle] = useState<File | null>(null);
+  const [bundle, setBundle] = useState<{ file: File; traceRows: number } | null>(null);
   // SSR 이 꺼진 컴포넌트라 첫 렌더에서 바로 읽어도 된다
   const [debug] = useState(() => isDebugEnabled());
   const [debugStates, setDebugStates] = useState<{ id: ExerciseId; st: DetectorState }[]>([]);
@@ -130,12 +135,15 @@ export default function FreeScreen() {
       savedRef.current = ok;
       setSaving(false);
     }
-    // 디버그 모드에서 증거가 쌓였으면 나가기 전에 AirDrop 묶음을 제안한다 (메모리에만 있어 나가면 사라진다)
+    // 디버그 모드면 나가기 전에 AirDrop 묶음을 제안한다 (메모리에만 있어 나가면 사라진다).
+    // 구간이 하나도 없어도 추적 기록이 있으면 제안한다 — "왜 아무것도 안 잡혔나"가 핵심 질문이다.
     const { segments } = freeLogRef.current;
-    if (debugRef.current && segments.some((s) => s.debug)) {
-      setBundle(
-        buildDebugBundle({ startedAt: startedAtRef.current, endedAt: Date.now(), segments }),
-      );
+    const trace = traceRef.current;
+    if (debugRef.current && (segments.some((s) => s.debug) || trace.length)) {
+      setBundle({
+        file: buildDebugBundle({ startedAt: startedAtRef.current, endedAt: Date.now(), segments, trace }),
+        traceRows: trace.length,
+      });
       return;
     }
     router.push('/');
@@ -143,7 +151,7 @@ export default function FreeScreen() {
 
   const shareBundle = async () => {
     if (!bundle) return;
-    const ok = await shareDebugBundle(bundle);
+    const ok = await shareDebugBundle(bundle.file);
     if (!ok) {
       alert('이 브라우저는 파일 공유를 지원하지 않습니다. iOS Safari에서 열어 주세요.');
       return;
@@ -179,6 +187,10 @@ export default function FreeScreen() {
 
     let log = freeLogRef.current;
     let segmentsChanged = false;
+    const traceDue = debugRef.current && frame.t - lastTraceTRef.current >= TRACE_INTERVAL_MS;
+    const traceRow: TraceRow | null = traceDue
+      ? { at: Math.max(0, Date.now() - startedAtRef.current), det: {} }
+      : null;
 
     const commit = (next: FreeLog) => {
       if (startedNewSegment(log, next)) segmentsChanged = true;
@@ -190,6 +202,10 @@ export default function FreeScreen() {
       // rep 은 저신뢰로, hold 는 유예 후 이탈로 처리되어 관절이 다 보일 때만 인식한다.
       const visible = fullBodyCheck(frame, EXERCISES[id].requiredChains);
       const events = det.update(visible ? frame : { ...frame, lm: [], world: [] });
+      if (traceRow) {
+        const st = det.state();
+        traceRow.det[id] = { visible, reps: st.reps, holding: st.holding, ...st.debug };
+      }
       if (det.kind === 'rep') {
         for (const e of events) {
           if (e.type === 'phase' && e.phase === 'bottom') {
@@ -251,6 +267,11 @@ export default function FreeScreen() {
         }
         holdRef.current[id] = { ms: 0, state: 'pending' };
       }
+    }
+
+    if (traceRow) {
+      lastTraceTRef.current = frame.t;
+      traceRef.current.push(traceRow);
     }
 
     if (log !== freeLogRef.current) {
@@ -427,9 +448,9 @@ export default function FreeScreen() {
               <div className="text-4xl">🧪</div>
               <h2 className="text-2xl font-black">디버그 묶음</h2>
               <p className="max-w-sm text-neutral-400">
-                사진 {freeLog.segments.filter((s) => s.debug?.photo).length}장과 세션 데이터,
-                뷰어 HTML을 한 폴더로 묶었습니다 ({Math.round(bundle.size / 1024)}KB). 서버로는
-                보내지 않으며, 나가면 사라집니다.
+                사진 {freeLog.segments.filter((s) => s.debug?.photo).length}장, 디텍터 추적{' '}
+                {bundle.traceRows}줄, 세션 데이터, 뷰어 HTML을 한 폴더로 묶었습니다 (
+                {Math.round(bundle.file.size / 1024)}KB). 서버로는 보내지 않으며, 나가면 사라집니다.
               </p>
               <button
                 onClick={shareBundle}

@@ -15,6 +15,14 @@ export interface Snapshot {
   photo?: string;
 }
 
+/** 디버그 모드에서 주기적으로 남기는 디텍터 상태 한 줄 — 아무것도 안 잡힐 때 이유를 보기 위한 것 */
+export interface TraceRow {
+  /** 세션 시작 기준 ms */
+  at: number;
+  /** 디텍터별: 필수 관절이 다 보였는지, 현재 rep/hold 상태, 게이트 값 */
+  det: Record<string, { visible: boolean; reps: number; holding: boolean } & Record<string, number | string | boolean>>;
+}
+
 const PHOTO_WIDTH = 320;
 const PHOTO_QUALITY = 0.6;
 

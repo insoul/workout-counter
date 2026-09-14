@@ -2,7 +2,7 @@ import { EXERCISES } from '@/lib/detectors/registry';
 import { POSE_EDGES } from '@/lib/pose/landmarks';
 import { buildZip, type ZipEntry } from '@/lib/zip';
 import type { Segment } from './log';
-import type { Snapshot } from './snapshot';
+import type { Snapshot, TraceRow } from './snapshot';
 
 /**
  * 디버그 묶음: 한 폴더에 사진(JPEG)·세션 데이터(JSON)·뷰어(index.html)를 넣은 ZIP.
@@ -15,6 +15,7 @@ export interface DebugBundleInput {
   startedAt: number;
   endedAt: number;
   segments: Segment[];
+  trace?: TraceRow[];
 }
 
 function stamp(ms: number): string {
@@ -50,6 +51,9 @@ h1{font-size:20px;margin:0 0 4px}.meta{color:#a3a3a3;margin-bottom:20px}
 @media (max-width:720px){.entry{grid-template-columns:1fr}}
 </style></head><body>
 <h1>운동 디버그</h1><div class="meta" id="meta"></div><div id="entries"></div>
+<h2 style="font-size:16px;margin:32px 0 8px">디텍터 추적 (0.5초 간격)</h2>
+<p class="meta">visible = 그 운동의 필수 관절이 모두 보임. 값이 -1 이면 계산 불가. 행을 펼쳐 시간 흐름을 본다.</p>
+<div id="trace"></div>
 <script type="application/json" id="data">${json}</script>
 <script>
 const EDGES=${JSON.stringify(POSE_EDGES)};
@@ -78,6 +82,21 @@ function shotOf(dbg,caption){
   if(dbg.photo){img.src=dbg.photo;img.onload=draw;img.onerror=()=>{img.remove();draw()};shot.appendChild(img)}else{img.remove();shot.style.height='240px';draw()}
   box.appendChild(shot);box.insertAdjacentHTML('beforeend',detHtml(dbg.det));
   return box;
+}
+const tr=document.getElementById('trace');
+if(!d.trace||!d.trace.length){tr.innerHTML='<p class="meta">추적 기록 없음 (디버그 모드가 꺼져 있었음)</p>'}
+else{
+  const ids=Object.keys(d.trace[0].det);
+  for(const id of ids){
+    const det=document.createElement('details');
+    const rows=d.trace.map(r=>r.det[id]).filter(Boolean);
+    const seen=rows.filter(x=>x.visible).length;
+    det.innerHTML='<summary style="cursor:pointer;padding:6px 0">'+(NAMES[id]||id)+' — 보인 프레임 '+seen+'/'+rows.length+'</summary>';
+    const pre=document.createElement('pre');pre.style.cssText='font-size:11px;line-height:1.4;color:#a3a3a3;overflow:auto;background:#171717;padding:8px;border-radius:8px';
+    pre.textContent=d.trace.map(r=>{const x=r.det[id];if(!x)return '';const {visible,reps,holding,...rest}=x;
+      return String((r.at/1000).toFixed(1)).padStart(6)+'s '+(visible?'V':'-')+' '+(KINDS[id]==='rep'?'reps='+reps:'hold='+(holding?'Y':'n'))+'  '+Object.entries(rest).map(([k,v])=>k+'='+v).join(' ');}).join('\\n');
+    det.appendChild(pre);tr.appendChild(det);
+  }
 }
 d.segments.forEach((s,i)=>{
   const el=document.createElement('div');el.className='entry';
@@ -116,7 +135,7 @@ export function buildDebugBundle(input: DebugBundleInput): File {
       bottom: pack(s.bottom, `entry-${n}-bottom`),
     };
   });
-  const data = { startedAt: input.startedAt, endedAt: input.endedAt, segments };
+  const data = { startedAt: input.startedAt, endedAt: input.endedAt, segments, trace: input.trace ?? [] };
   const enc = new TextEncoder();
   entries.push({ name: `${folder}/session.json`, data: enc.encode(JSON.stringify(data, null, 2)) });
   entries.push({ name: `${folder}/index.html`, data: enc.encode(viewerHtml(data)) });

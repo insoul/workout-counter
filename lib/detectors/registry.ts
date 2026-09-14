@@ -83,8 +83,9 @@ export const EXERCISES: Record<ExerciseId, ExerciseMeta> = {
     kind: 'rep',
     cameraSetupKo: '철봉과 매달린 전신이 모두 보이도록 폰을 3m 이상 멀리 두세요.',
     cameraIcon: '🧗',
+    // 손목은 철봉을 잡으면 가려져 신뢰도가 떨어지므로 필수 관절에서 뺀다 — 팔꿈치로 팔을 확인한다
     requiredChains: [
-      [LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER, LM.LEFT_WRIST, LM.RIGHT_WRIST, LM.LEFT_HIP, LM.RIGHT_HIP],
+      [LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER, LM.LEFT_ELBOW, LM.RIGHT_ELBOW, LM.LEFT_HIP, LM.RIGHT_HIP],
     ],
     create: createPullupDetector,
   },
@@ -95,8 +96,9 @@ export const EXERCISES: Record<ExerciseId, ExerciseMeta> = {
     kind: 'hold',
     cameraSetupKo: '철봉과 매달린 전신이 모두 보이도록 폰을 3m 이상 멀리 두세요.',
     cameraIcon: '🙆',
+    // 풀업과 같은 이유로 손목 대신 팔꿈치
     requiredChains: [
-      [LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER, LM.LEFT_WRIST, LM.RIGHT_WRIST, LM.LEFT_HIP, LM.RIGHT_HIP],
+      [LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER, LM.LEFT_ELBOW, LM.RIGHT_ELBOW, LM.LEFT_HIP, LM.RIGHT_HIP],
     ],
     create: createDeadhangDetector,
   },
