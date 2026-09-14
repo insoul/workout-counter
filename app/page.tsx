@@ -96,6 +96,12 @@ export default async function Home() {
       >
         운동 시작
       </Link>
+      <Link
+        href="/free"
+        className="mt-3 rounded-3xl bg-white/10 py-4 text-center text-lg font-bold active:bg-white/20"
+      >
+        🏃 자유 운동 · 루틴 없이 알아서 카운트
+      </Link>
 
       {/* 나머지 루틴 목록 */}
       {userId && (
