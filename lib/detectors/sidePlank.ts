@@ -1,6 +1,7 @@
 import { LM } from '@/lib/pose/landmarks';
 import { jointAngle, lineAngleToHorizontal } from '@/lib/geometry/angles';
 import { HoldDetector } from './holdEngine';
+import { deg, ratio, yn, type Inspection } from './inspect';
 import type { ExerciseDetector, PoseFrame } from './types';
 
 /**
@@ -10,15 +11,15 @@ import type { ExerciseDetector, PoseFrame } from './types';
  * 다른 디텍터와 동시에 돌 때 오인식의 원인이 된다.
  * 좌/우 구분은 루틴 단계가 안내하고 여기선 자세만 본다.
  */
-function isSidePlanking(f: PoseFrame): boolean | null {
-  if (!f.lm.length || !f.world.length) return null;
+function analyze(f: PoseFrame) {
+  if (!f.lm.length || !f.world.length) return { holding: null };
 
   // 지지 측 = 더 낮은(화면 y가 큰) 팔꿈치
   const candidates = (['left', 'right'] as const).filter((s) => {
     const el = s === 'left' ? LM.LEFT_ELBOW : LM.RIGHT_ELBOW;
     return f.lm[el].visibility >= 0.4;
   });
-  if (!candidates.length) return null;
+  if (!candidates.length) return { holding: null };
   const side =
     candidates.length === 1
       ? candidates[0]
@@ -31,18 +32,32 @@ function isSidePlanking(f: PoseFrame): boolean | null {
       ? [LM.LEFT_SHOULDER, LM.LEFT_ELBOW, LM.LEFT_HIP, LM.LEFT_ANKLE]
       : [LM.RIGHT_SHOULDER, LM.RIGHT_ELBOW, LM.RIGHT_HIP, LM.RIGHT_ANKLE];
   const vis = Math.min(f.lm[sh].visibility, f.lm[hip].visibility, f.lm[ankle].visibility);
-  if (vis < 0.4) return null;
+  if (vis < 0.4) return { holding: null, side, vis };
 
-  const bodyStraight = jointAngle(f.world[sh], f.world[hip], f.world[ankle]) > 150;
-  const bodyHorizontal = lineAngleToHorizontal(f.lm[sh], f.lm[ankle]) < 35;
-  const stacked = f.lm[sh].y < f.lm[el].y && Math.abs(f.lm[sh].x - f.lm[el].x) < 0.12;
+  const body = jointAngle(f.world[sh], f.world[hip], f.world[ankle]);
+  const tilt = lineAngleToHorizontal(f.lm[sh], f.lm[ankle]);
+  const dx = Math.abs(f.lm[sh].x - f.lm[el].x);
+  const stacked = f.lm[sh].y < f.lm[el].y && dx < 0.12;
+  const holding = body > 150 && tilt < 35 && stacked;
+  return { holding, side, vis, body, tilt, dx, stacked };
+}
 
-  return bodyStraight && bodyHorizontal && stacked;
+function inspect(f: PoseFrame): Inspection {
+  const a = analyze(f);
+  return {
+    side: a.side ?? '?',
+    body: deg(a.body),
+    tilt: deg(a.tilt),
+    stacked: yn(a.stacked),
+    dx: ratio(a.dx),
+    vis: ratio(a.vis),
+  };
 }
 
 export function createSidePlankDetector(): ExerciseDetector {
   return new HoldDetector('sideplank', {
-    isHolding: isSidePlanking,
+    isHolding: (f) => analyze(f).holding,
+    inspect,
     startSustainMs: 500,
     graceMs: 1000,
     formHintKo: '엉덩이를 들어 올리세요',

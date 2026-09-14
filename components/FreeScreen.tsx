@@ -14,6 +14,8 @@ import {
   startedNewSegment,
   type FreeLog,
 } from '@/lib/free/log';
+import { buildDebugBundle, shareDebugBundle } from '@/lib/free/debugBundle';
+import { captureSnapshot } from '@/lib/free/snapshot';
 import { PoseEngine } from '@/lib/pose/engine';
 import { drawPose } from '@/lib/pose/draw';
 import { beaconSession, saveSession } from '@/lib/sessions/client';
@@ -86,6 +88,7 @@ export default function FreeScreen() {
   const [paused, setPaused] = useState(false);
   const [freeLog, setFreeLog] = useState<FreeLog>(EMPTY_LOG);
   const [saving, setSaving] = useState(false);
+  const [bundle, setBundle] = useState<File | null>(null);
   // SSR 이 꺼진 컴포넌트라 첫 렌더에서 바로 읽어도 된다
   const [debug] = useState(() => isDebugEnabled());
   const [debugStates, setDebugStates] = useState<{ id: ExerciseId; st: DetectorState }[]>([]);
@@ -116,6 +119,24 @@ export default function FreeScreen() {
       const ok = await saveSession(input);
       savedRef.current = ok;
       setSaving(false);
+    }
+    // 디버그 모드에서 증거가 쌓였으면 나가기 전에 AirDrop 묶음을 제안한다 (메모리에만 있어 나가면 사라진다)
+    const { segments } = freeLogRef.current;
+    if (debugRef.current && segments.some((s) => s.debug)) {
+      setBundle(
+        buildDebugBundle({ startedAt: startedAtRef.current, endedAt: Date.now(), segments }),
+      );
+      return;
+    }
+    router.push('/');
+  };
+
+  const shareBundle = async () => {
+    if (!bundle) return;
+    const ok = await shareDebugBundle(bundle);
+    if (!ok) {
+      alert('이 브라우저는 파일 공유를 지원하지 않습니다. iOS Safari에서 열어 주세요.');
+      return;
     }
     router.push('/');
   };
@@ -169,7 +190,12 @@ export default function FreeScreen() {
               continue;
             }
             const before = log;
-            commit(addRep(before, id));
+            const last = before.segments[before.segments.length - 1];
+            const snap =
+              debugRef.current && last?.exerciseId !== id
+                ? captureSnapshot(det, frame, startedAtRef.current, videoRef.current)
+                : undefined;
+            commit(addRep(before, id, snap));
             const count = log.segments[log.segments.length - 1].value;
             const name = startedNewSegment(before, log) ? `${EXERCISES[id].nameKo}, ` : '';
             speak(`${name}${koCount(count)}`, 'count');
@@ -185,7 +211,10 @@ export default function FreeScreen() {
         track.ms += dt;
         if (!track.committed && track.ms >= HOLD_MIN_MS) {
           track.committed = true;
-          commit(addHoldMs(log, id, track.ms));
+          const snap = debugRef.current
+            ? captureSnapshot(det, frame, startedAtRef.current, videoRef.current)
+            : undefined;
+          commit(addHoldMs(log, id, track.ms, snap));
           speak(`${EXERCISES[id].nameKo} 시작`);
         } else if (track.committed && dt > 0) {
           commit(addHoldMs(log, id, dt));
@@ -361,9 +390,30 @@ export default function FreeScreen() {
             </div>
           </div>
 
-          {paused && (
+          {paused && !bundle && (
             <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/70">
               <div className="text-4xl font-black">⏸ 일시정지</div>
+            </div>
+          )}
+
+          {bundle && (
+            <div className="absolute inset-0 z-40 flex flex-col items-center justify-center gap-4 bg-neutral-950/95 p-6 text-center">
+              <div className="text-4xl">🧪</div>
+              <h2 className="text-2xl font-black">디버그 묶음</h2>
+              <p className="max-w-sm text-neutral-400">
+                사진 {freeLog.segments.filter((s) => s.debug?.photo).length}장과 세션 데이터,
+                뷰어 HTML을 한 폴더로 묶었습니다 ({Math.round(bundle.size / 1024)}KB). 서버로는
+                보내지 않으며, 나가면 사라집니다.
+              </p>
+              <button
+                onClick={shareBundle}
+                className="rounded-2xl bg-green-500 px-8 py-4 text-lg font-bold text-black active:bg-green-400"
+              >
+                AirDrop으로 보내기
+              </button>
+              <button onClick={() => router.push('/')} className="text-sm text-neutral-500 underline">
+                그냥 나가기
+              </button>
             </div>
           )}
         </>

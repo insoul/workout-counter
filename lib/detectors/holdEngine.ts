@@ -9,6 +9,8 @@ export interface HoldConfig {
   graceMs?: number;
   /** 자세 이탈 시 음성 힌트 (10초에 1번 스로틀) */
   formHintKo?: string;
+  /** 디버그용 — 마지막 프레임의 판정 근거 (각도, 자세 조건 등) */
+  inspect?: (frame: PoseFrame) => Record<string, number | string>;
 }
 
 /** 지속 조건 기반 홀드 타이머 (유예 시간 포함) */
@@ -23,6 +25,7 @@ export class HoldDetector implements ExerciseDetector {
   private lowSince: number | null = null;
   private lastHintT = 0;
   private lastValue: boolean | null = null;
+  private lastFrame: PoseFrame | null = null;
 
   constructor(
     readonly id: string,
@@ -35,6 +38,7 @@ export class HoldDetector implements ExerciseDetector {
     const dt = this.lastT == null ? 0 : Math.min(frame.t - this.lastT, 100);
     this.lastT = frame.t;
 
+    this.lastFrame = frame;
     const v = this.cfg.isHolding(frame);
     this.lastValue = v;
 
@@ -93,6 +97,7 @@ export class HoldDetector implements ExerciseDetector {
       debug: {
         holding: String(this.lastValue),
         holdSec: Math.round(this.holdMs / 100) / 10,
+        ...(this.cfg.inspect && this.lastFrame ? this.cfg.inspect(this.lastFrame) : {}),
       },
     };
   }
@@ -110,5 +115,6 @@ export class HoldDetector implements ExerciseDetector {
     this.confident = true;
     this.lowSince = null;
     this.lastValue = null;
+    this.lastFrame = null;
   }
 }

@@ -14,6 +14,8 @@ export interface RepConfig {
   minRepMs?: number;
   /** null metric이 이 시간 지속되면 lowConfidence 이벤트 */
   lowConfMs?: number;
+  /** 디버그용 — 마지막 프레임의 게이트 판단 근거 (각도, 자세 조건 등) */
+  inspect?: (frame: PoseFrame) => Record<string, number | string>;
 }
 
 type RepPhase = 'top' | 'descending' | 'bottom' | 'ascending';
@@ -28,6 +30,7 @@ export class RepDetector implements ExerciseDetector {
   private lowSince: number | null = null;
   private median = new MedianWindow(3);
   private lastMetric: number | null = null;
+  private lastFrame: PoseFrame | null = null;
 
   constructor(
     readonly id: string,
@@ -36,6 +39,7 @@ export class RepDetector implements ExerciseDetector {
 
   update(frame: PoseFrame): DetectorEvent[] {
     const events: DetectorEvent[] = [];
+    this.lastFrame = frame;
     const raw = this.cfg.metric(frame);
 
     if (raw == null) {
@@ -97,6 +101,7 @@ export class RepDetector implements ExerciseDetector {
       debug: {
         metric: this.lastMetric != null ? Math.round(this.lastMetric) : -1,
         phase: this.phase,
+        ...(this.cfg.inspect && this.lastFrame ? this.cfg.inspect(this.lastFrame) : {}),
       },
     };
   }
@@ -113,5 +118,6 @@ export class RepDetector implements ExerciseDetector {
     this.confident = true;
     this.median.reset();
     this.lastMetric = null;
+    this.lastFrame = null;
   }
 }
