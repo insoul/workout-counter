@@ -19,6 +19,7 @@ import { buildDebugBundle, shareDebugBundle } from '@/lib/free/debugBundle';
 import { captureSnapshot, type Snapshot } from '@/lib/free/snapshot';
 import { PoseEngine } from '@/lib/pose/engine';
 import { drawPose } from '@/lib/pose/draw';
+import { fullBodyCheck } from '@/lib/pose/fullBodyCheck';
 import { beaconSession, saveSession } from '@/lib/sessions/client';
 import type { SessionInput } from '@/lib/sessions/types';
 import { ding, primeBeep } from '@/lib/speech/beep';
@@ -185,7 +186,10 @@ export default function FreeScreen() {
     };
 
     for (const { id, det } of detectorsRef.current) {
-      const events = det.update(frame);
+      // 그 운동에 필요한 관절(registry.requiredChains)이 하나라도 안 보이면 "사람 없음" 프레임으로 넘긴다.
+      // rep 은 저신뢰로, hold 는 유예 후 이탈로 처리되어 관절이 다 보일 때만 인식한다.
+      const visible = fullBodyCheck(frame, EXERCISES[id].requiredChains);
+      const events = det.update(visible ? frame : { ...frame, lm: [], world: [] });
       if (det.kind === 'rep') {
         for (const e of events) {
           if (e.type === 'phase' && e.phase === 'bottom') {
