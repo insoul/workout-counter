@@ -52,8 +52,11 @@ const SQUAT_MAX_BOTTOM_MS = 4000;
  */
 const HOLD_QUIET_MS = 3000;
 
-/** 이보다 짧은 hold 는 로그에 올리지 않는다 — 자세 전환 중 스치는 시간을 걸러낸다 */
-const HOLD_MIN_MS = 3000;
+/**
+ * 유지 동작은 이 시간을 넘겨야 로그에 오른다. 오르는 순간 값은 0이 아니라 여기서부터 시작한다
+ * (10초를 버텼으면 "10초"). 자세 전환 중 스치는 시간과 매달리기 준비 같은 짧은 정지를 걸러낸다.
+ */
+const HOLD_MIN_MS = 10000;
 
 /** 프레임 루프에서 화면 갱신 최소 간격 */
 const UI_INTERVAL_MS = 250;
@@ -229,12 +232,14 @@ export default function FreeScreen() {
               ? captureSnapshot(det, frame, startedAtRef.current, videoRef.current)
               : undefined;
             commit(addHoldMs(log, id, track.ms, snap));
-            speak(`${EXERCISES[id].nameKo} 시작`);
+            speak(`${EXERCISES[id].nameKo} ${Math.floor(track.ms / 1000)}초`);
           }
         } else if (track.state === 'logged' && dt > 0) {
-          // 로그에 오른 뒤 풀업이 시작돼 데드행 구간이 지워졌으면 더 쌓지 않는다
-          if (isHoldSuppressed(log, id)) track.state = 'dropped';
-          else commit(addHoldMs(log, id, dt));
+          // 자기 구간이 마지막일 때만 이어 쌓는다. 다른 구간이 끼어들었거나(동시에 유지된 다른 hold,
+          // 풀업이 데드행을 지운 경우) 하면 이번 hold 는 끝난 것으로 보고 새 구간을 만들지 않는다.
+          const last = log.segments[log.segments.length - 1];
+          if (last?.exerciseId === id) commit(addHoldMs(log, id, dt));
+          else track.state = 'dropped';
         }
       } else if (track.ms > 0) {
         if (track.state === 'logged') {

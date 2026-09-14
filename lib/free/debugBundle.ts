@@ -84,7 +84,7 @@ d.segments.forEach((s,i)=>{
   const shots=document.createElement('div');shots.className='shots';
   const isRep=(KINDS[s.exerciseId]||s.kind)==='rep';
   if(s.bottom)shots.appendChild(shotOf(s.bottom,'굽힘(바닥)'));
-  if(s.debug)shots.appendChild(shotOf(s.debug,isRep?'폄(카운트)':'3초 도달(기록)'));
+  if(s.debug)shots.appendChild(shotOf(s.debug,isRep?'폄(카운트)':'기준 시간 도달(기록)'));
   const info=document.createElement('div');
   info.innerHTML='<div class="title">'+(i+1)+'. '+(NAMES[s.exerciseId]||s.exerciseId)+' <span class="val">'+fmt(KINDS[s.exerciseId]||s.kind,s.value)+'</span></div>'
     +'<div class="at">'+(isRep?'첫 rep 의 굽힘·폄 두 시점':'기록에 오른 순간')+'</div>';

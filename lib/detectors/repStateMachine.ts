@@ -84,7 +84,9 @@ export class RepDetector implements ExerciseDetector {
             events.push({ type: 'rep', count: this.reps });
           }
         } else if (m <= bottom) {
+          // 올라오다 다시 내려간 경우도 바닥 진입으로 알린다 — 굽힘 시점 증거가 마지막 바닥이 되도록
           this.phase = 'bottom';
+          events.push({ type: 'phase', phase: 'bottom' });
         }
         break;
     }

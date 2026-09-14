@@ -9,7 +9,7 @@ export interface Segment {
   exerciseId: ExerciseId;
   kind: 'rep' | 'hold';
   value: number;
-  /** 구간이 처음 만들어진 순간(rep 은 펴진 시점, hold 는 3초 도달)의 증거 — 이후 합쳐져도 그대로 둔다 */
+  /** 구간이 처음 만들어진 순간(rep 은 펴진 시점, hold 는 기준 시간 도달)의 증거 — 이후 합쳐져도 그대로 둔다 */
   debug?: Snapshot;
   /** rep 구간만: 같은 rep 의 굽힌 시점(바닥) 증거 */
   bottom?: Snapshot;

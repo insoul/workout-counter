@@ -6,7 +6,12 @@ import type { ExerciseDetector, PoseFrame } from './types';
 
 const LOWER = [LM.LEFT_HIP, LM.RIGHT_HIP, LM.LEFT_KNEE, LM.RIGHT_KNEE, LM.LEFT_ANKLE, LM.RIGHT_ANKLE];
 
-/** 한발 서기 판정: 한쪽 발목이 정강이 길이의 35% 이상 들려 있고 서 있는 자세 */
+/**
+ * 한발 서기 판정: 한쪽 발목이 정강이 길이의 35% 이상 들려 있고, 그쪽 무릎도 함께 올라와 있으며,
+ * 서 있는 자세(엉덩이가 무릎 위)이고 손이 어깨 위에 있지 않다.
+ * 무릎 조건은 발을 앞뒤로 벌리고 선 자세(원근 때문에 앞발 발목이 화면에서 더 아래)를,
+ * 손 조건은 철봉에 매달려 다리가 흔들리는 상태를 걸러낸다.
+ */
 function analyze(f: PoseFrame) {
   if (!f.lm.length) return { holding: null };
   const vis = avgVisibility(f.lm, LOWER);
@@ -22,17 +27,24 @@ function analyze(f: PoseFrame) {
 
   const liftRatio = Math.abs(aL.y - aR.y) / shin;
   const lifted = liftRatio > 0.35;
+  // 든 쪽(발목이 더 위) 무릎이 지지 쪽 무릎보다 정강이의 15% 이상 위에 있어야 한다
+  const liftedKnee = aL.y > aR.y ? LM.RIGHT_KNEE : LM.LEFT_KNEE;
+  const kneeRatio = (f.lm[standingKnee].y - f.lm[liftedKnee].y) / shin;
+  const kneeUp = kneeRatio > 0.15;
   const upright =
     mid(f.lm[LM.LEFT_HIP], f.lm[LM.RIGHT_HIP]).y < mid(f.lm[LM.LEFT_KNEE], f.lm[LM.RIGHT_KNEE]).y;
-  return { holding: lifted && upright, vis, shin, liftRatio, upright };
+  const handsDown =
+    f.lm[LM.LEFT_WRIST].y > f.lm[LM.LEFT_SHOULDER].y && f.lm[LM.RIGHT_WRIST].y > f.lm[LM.RIGHT_SHOULDER].y;
+  return { holding: lifted && kneeUp && upright && handsDown, vis, shin, liftRatio, kneeRatio, upright, handsDown };
 }
 
 function inspect(f: PoseFrame): Inspection {
   const a = analyze(f);
   return {
     lift: ratio(a.liftRatio),
-    shin: ratio(a.shin),
+    kneeUp: ratio(a.kneeRatio),
     upright: yn(a.upright),
+    handsDown: yn(a.handsDown),
     vis: ratio(a.vis),
   };
 }
