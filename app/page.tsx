@@ -104,9 +104,10 @@ export default async function Home() {
       </Link>
       <Link
         href="/free"
-        className="mt-3 rounded-3xl bg-white/10 py-4 text-center text-lg font-bold active:bg-white/20"
+        className="mt-3 flex flex-col items-center rounded-3xl bg-white/10 py-3 active:bg-white/20"
       >
-        🏃 자유 운동 · 루틴 없이 알아서 카운트
+        <span className="text-lg font-bold">🏃 자유 운동</span>
+        <span className="text-xs text-neutral-400">루틴 없이 알아서 카운트</span>
       </Link>
 
       {/* 나머지 루틴 목록 */}
