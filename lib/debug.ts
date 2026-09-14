@@ -14,6 +14,26 @@ export function isDebugEnabled(): boolean {
   }
 }
 
+const RULES_KEY = 'forceRules';
+
+/** 샘플이 충분해도 규칙 디텍터를 쓰게 하는 스위치 — 학습 디텍터와 비교 실험용 */
+export function isRulesForced(): boolean {
+  try {
+    return localStorage.getItem(RULES_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function setRulesForced(on: boolean): void {
+  try {
+    if (on) localStorage.setItem(RULES_KEY, '1');
+    else localStorage.removeItem(RULES_KEY);
+  } catch {
+    // 프라이빗 모드 등
+  }
+}
+
 export function setDebugEnabled(on: boolean): void {
   try {
     if (on) localStorage.setItem(KEY, '1');
