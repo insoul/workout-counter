@@ -1,11 +1,14 @@
 import { LM } from '@/lib/pose/landmarks';
-import { jointAngle } from '@/lib/geometry/angles';
+import { jointAngle, lineAngleToHorizontal } from '@/lib/geometry/angles';
 import { HoldDetector } from './holdEngine';
 import type { ExerciseDetector, PoseFrame } from './types';
 
 /**
  * 사이드 플랭크 판정: 지지 팔꿈치(화면에서 더 아래쪽) 위에 어깨가 쌓여 있고
- * 어깨-엉덩이-발목이 일직선. 좌/우 구분은 루틴 단계가 안내하고 여기선 자세만 본다.
+ * 어깨-엉덩이-발목이 일직선이며 몸이 수평에 가깝다(35도 이내).
+ * 수평 조건이 없으면 팔을 내리고 서 있는 자세도 통과한다 — 자유 운동처럼
+ * 다른 디텍터와 동시에 돌 때 오인식의 원인이 된다.
+ * 좌/우 구분은 루틴 단계가 안내하고 여기선 자세만 본다.
  */
 function isSidePlanking(f: PoseFrame): boolean | null {
   if (!f.lm.length || !f.world.length) return null;
@@ -31,9 +34,10 @@ function isSidePlanking(f: PoseFrame): boolean | null {
   if (vis < 0.4) return null;
 
   const bodyStraight = jointAngle(f.world[sh], f.world[hip], f.world[ankle]) > 150;
+  const bodyHorizontal = lineAngleToHorizontal(f.lm[sh], f.lm[ankle]) < 35;
   const stacked = f.lm[sh].y < f.lm[el].y && Math.abs(f.lm[sh].x - f.lm[el].x) < 0.12;
 
-  return bodyStraight && stacked;
+  return bodyStraight && bodyHorizontal && stacked;
 }
 
 export function createSidePlankDetector(): ExerciseDetector {

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { EXERCISES } from '@/lib/detectors/registry';
 import type { DetectorState, ExerciseDetector, PoseFrame } from '@/lib/detectors/types';
 import { startCamera, stopCamera } from '@/lib/camera';
+import { isDebugEnabled } from '@/lib/debug';
 import { PoseEngine } from '@/lib/pose/engine';
 import { drawPose, type PoseStatus } from '@/lib/pose/draw';
 import { fullBodyCheck } from '@/lib/pose/fullBodyCheck';
@@ -47,7 +48,7 @@ export default function WorkoutScreen({ steps }: { steps: RoutineStep[] }) {
   const [debug, setDebug] = useState(false);
 
   useEffect(() => {
-    setDebug(new URLSearchParams(window.location.search).has('debug'));
+    setDebug(isDebugEnabled());
   }, []);
 
   const step = steps[state.stepIdx];

@@ -3,8 +3,9 @@
 import { useRouter } from 'next/navigation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { EXERCISES, type ExerciseId } from '@/lib/detectors/registry';
-import type { ExerciseDetector, PoseFrame } from '@/lib/detectors/types';
+import type { DetectorState, ExerciseDetector, PoseFrame } from '@/lib/detectors/types';
 import { startCamera, stopCamera } from '@/lib/camera';
+import { isDebugEnabled } from '@/lib/debug';
 import {
   addHoldMs,
   addRep,
@@ -85,6 +86,11 @@ export default function FreeScreen() {
   const [paused, setPaused] = useState(false);
   const [freeLog, setFreeLog] = useState<FreeLog>(EMPTY_LOG);
   const [saving, setSaving] = useState(false);
+  // SSR 이 꺼진 컴포넌트라 첫 렌더에서 바로 읽어도 된다
+  const [debug] = useState(() => isDebugEnabled());
+  const [debugStates, setDebugStates] = useState<{ id: ExerciseId; st: DetectorState }[]>([]);
+  const [fps, setFps] = useState(0);
+  const debugRef = useRef(debug);
 
   useEffect(() => {
     pausedRef.current = paused;
@@ -128,6 +134,10 @@ export default function FreeScreen() {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (canvas && video) drawPose(canvas, video, frame, frame.lm.length ? 'good' : 'idle');
+    if (debugRef.current && frame.t - lastUiTRef.current > UI_INTERVAL_MS) {
+      setFps(frame.fps);
+      setDebugStates(detectorsRef.current.map(({ id, det }) => ({ id, st: det.state() })));
+    }
     if (pausedRef.current) {
       lastFrameTRef.current = null;
       return;
@@ -275,6 +285,21 @@ export default function FreeScreen() {
           >
             {loading ? '모델 로딩 중…' : '시작'}
           </button>
+        </div>
+      )}
+
+      {debug && (
+        <div className="absolute left-2 top-2 z-40 max-h-[60vh] overflow-y-auto rounded-lg bg-black/70 p-2 font-mono text-[10px] leading-tight text-green-300">
+          <div>fps {fps}</div>
+          {debugStates.map(({ id, st }) => (
+            <div key={id} className={st.holding || st.reps > 0 ? 'text-yellow-300' : ''}>
+              {id} {st.kind === 'rep' ? `reps=${st.reps}` : `hold=${st.holding ? 'Y' : 'n'}`}
+              {!st.confident ? ' lowconf' : ''}{' '}
+              {Object.entries(st.debug)
+                .map(([k, v]) => `${k}=${v}`)
+                .join(' ')}
+            </div>
+          ))}
         </div>
       )}
 

@@ -6,6 +6,7 @@ import { listSessions } from "@/lib/sessions/db";
 import { summarizeSession, type WorkoutSession } from "@/lib/sessions/types";
 import { DEFAULT_ITEMS, type RoutineItem } from "@/lib/routine/custom";
 import { targetLabel } from "@/lib/routine/format";
+import DebugToggle from "@/components/DebugToggle";
 
 export const dynamic = "force-dynamic";
 
@@ -54,7 +55,9 @@ export default async function Home() {
   return (
     <main className="mx-auto flex w-full max-w-md flex-1 flex-col p-6">
       <div className="mb-1 flex items-start justify-between">
-        <h1 className="text-3xl font-black">💪 홈트 트래커</h1>
+        <h1 className="text-3xl font-black">
+          <DebugToggle>💪</DebugToggle> 홈트 트래커
+        </h1>
         {session?.user ? (
           <form
             action={async () => {
