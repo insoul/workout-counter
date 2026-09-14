@@ -109,6 +109,11 @@ export default async function Home() {
         <span className="text-lg font-bold">🏃 자유 운동</span>
         <span className="text-xs text-neutral-400">루틴 없이 알아서 카운트</span>
       </Link>
+      {userId && (
+        <Link href="/learn" className="mt-2 text-center text-sm text-neutral-400 underline">
+          🎓 학습 모드 — 내 동작을 녹화해 인식 정확도 높이기
+        </Link>
+      )}
 
       {/* 나머지 루틴 목록 */}
       {userId && (

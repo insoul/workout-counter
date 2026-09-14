@@ -1,7 +1,7 @@
 'use client';
 
 import { useRef, useState, useSyncExternalStore } from 'react';
-import { isDebugEnabled, setDebugEnabled } from '@/lib/debug';
+import { isDebugEnabled, isRulesForced, setDebugEnabled, setRulesForced } from '@/lib/debug';
 
 const TAPS = 5;
 const WINDOW_MS = 2000;
@@ -18,6 +18,7 @@ const emit = () => listeners.forEach((cb) => cb());
 export default function DebugToggle({ children }: { children: React.ReactNode }) {
   // 서버 렌더에서는 항상 꺼짐 — localStorage 는 클라이언트에서만 읽어 hydration 불일치를 피한다
   const on = useSyncExternalStore(subscribe, isDebugEnabled, () => false);
+  const rules = useSyncExternalStore(subscribe, isRulesForced, () => false);
   const [toast, setToast] = useState<string | null>(null);
   const tapsRef = useRef<number[]>([]);
 
@@ -39,9 +40,22 @@ export default function DebugToggle({ children }: { children: React.ReactNode })
         {children}
       </span>
       {on && (
-        <span className="ml-2 align-middle rounded bg-green-500/20 px-1.5 py-0.5 font-mono text-[10px] font-normal text-green-300">
-          debug
-        </span>
+        <>
+          <span className="ml-2 align-middle rounded bg-green-500/20 px-1.5 py-0.5 font-mono text-[10px] font-normal text-green-300">
+            debug
+          </span>
+          <label className="ml-2 inline-flex cursor-pointer items-center gap-1 align-middle font-mono text-[10px] font-normal text-neutral-400">
+            <input
+              type="checkbox"
+              checked={rules}
+              onChange={(e) => {
+                setRulesForced(e.target.checked);
+                emit();
+              }}
+            />
+            규칙 강제
+          </label>
+        </>
       )}
       {toast && (
         <span className="absolute left-0 top-full mt-1 whitespace-nowrap rounded bg-black/80 px-2 py-1 text-xs font-normal text-white">
