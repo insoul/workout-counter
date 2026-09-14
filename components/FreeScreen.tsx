@@ -204,7 +204,7 @@ export default function FreeScreen() {
       const events = det.update(visible ? frame : { ...frame, lm: [], world: [] });
       if (traceRow) {
         const st = det.state();
-        traceRow.det[id] = { visible, reps: st.reps, holding: st.holding, ...st.debug };
+        traceRow.det[id] = { ...st.debug, visible, reps: st.reps, holding: st.holding };
       }
       if (det.kind === 'rep') {
         for (const e of events) {
@@ -241,7 +241,10 @@ export default function FreeScreen() {
       // hold 운동: 자세 유지 중이고 rep 움직임이 잠잠할 때만 시간을 쌓는다
       const track = (holdRef.current[id] ??= { ms: 0, state: 'pending' });
       const quiet = frame.t - lastMotionTRef.current > HOLD_QUIET_MS;
-      if (det.state().holding && quiet) {
+      const holding = det.state().holding;
+      if (holding && !quiet) {
+        // 다른 디텍터의 굽힘 이벤트 직후 — 누적만 멈춘다. 리셋하면 오인식 한 번에 유지 시간이 날아간다
+      } else if (holding) {
         track.ms += dt;
         if (track.state === 'pending' && track.ms >= HOLD_MIN_MS) {
           if (isHoldSuppressed(log, id)) {

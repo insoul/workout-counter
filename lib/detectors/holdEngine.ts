@@ -95,7 +95,7 @@ export class HoldDetector implements ExerciseDetector {
       holding: this.holding,
       confident: this.confident,
       debug: {
-        holding: String(this.lastValue),
+        pose: String(this.lastValue), // 마지막 프레임의 자세 판정 (true/false/null=판정 불가)
         holdSec: Math.round(this.holdMs / 100) / 10,
         ...(this.cfg.inspect && this.lastFrame ? this.cfg.inspect(this.lastFrame) : {}),
       },

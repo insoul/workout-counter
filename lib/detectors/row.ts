@@ -13,7 +13,8 @@ const RIGHT = [LM.RIGHT_SHOULDER, LM.RIGHT_ELBOW, LM.RIGHT_WRIST, LM.RIGHT_HIP, 
 /**
  * 팔꿈치 각도: 팔을 뻗으면(150+) → 당기면(<90) → 다시 뻗으면 1회.
  * 어깨·팔꿈치·손목·엉덩이·무릎 다섯 관절이 모두 보여야 하고(하나라도 흐리면 세지 않는다),
- * "허리 숙이고 다리는 선" 자세여야 한다 — 몸통은 수평에서 20~70도, 허벅지는 60도 이상.
+ * "허리 숙이고 다리는 선" 자세여야 한다 — 몸통은 수평에서 20~60도, 허벅지는 60도 이상.
+ * 상한 60도는 매달림(몸통 63도 이상)과 겹치지 않게 잡은 값이다.
  * 손목은 어깨보다 아래에 있어야 한다 — 로우는 팔을 늘어뜨린 채 당기므로 손이 어깨 위로 가지 않는다.
  * 엎드린 푸시업(허벅지 수평), 선 자세에서 팔 흔들기(몸통 수직), 폰을 놓으며 손이
  * 카메라 앞을 지나는 동작(몸이 안 보임), 철봉을 잡으러 팔을 올리는 동작(손이 머리 위)을 걸러낸다.
@@ -27,7 +28,7 @@ function analyze(f: PoseFrame) {
   const thigh = lineAngleToHorizontal(f.lm[hip], f.lm[knee]);
   const elbow = jointAngle(f.world[sh], f.world[el], f.world[wr]);
   const wristBelow = f.lm[wr].y > f.lm[sh].y;
-  const postureOk = torso >= 20 && torso <= 70 && thigh >= 60 && wristBelow;
+  const postureOk = torso >= 20 && torso <= 60 && thigh >= 60 && wristBelow;
   const gated = vis < CONFIG.minVis || !postureOk;
   return { metric: gated ? null : elbow, side, vis, torso, thigh, wristBelow, elbow };
 }
