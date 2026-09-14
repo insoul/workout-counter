@@ -5,7 +5,14 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { EXERCISES, type ExerciseId } from '@/lib/detectors/registry';
 import type { ExerciseDetector, PoseFrame } from '@/lib/detectors/types';
 import { startCamera, stopCamera } from '@/lib/camera';
-import { addRep, EMPTY_LOG, startedNewSegment, type FreeLog } from '@/lib/free/log';
+import {
+  addHoldMs,
+  addRep,
+  EMPTY_LOG,
+  formatValue,
+  startedNewSegment,
+  type FreeLog,
+} from '@/lib/free/log';
 import { PoseEngine } from '@/lib/pose/engine';
 import { drawPose } from '@/lib/pose/draw';
 import { ding, primeBeep } from '@/lib/speech/beep';
@@ -13,8 +20,17 @@ import { koCount } from '@/lib/speech/phrases.ko';
 import { primeVoice, speak } from '@/lib/speech/voice';
 import { releaseWakeLock, requestWakeLock } from '@/lib/wakeLock';
 
-/** 동시에 돌리는 디텍터. 서로 자세 게이트가 있어 섞이지 않는 rep 운동만 */
-const FREE_EXERCISES: ExerciseId[] = ['squat', 'pushup', 'pullup'];
+/** 동시에 돌리는 디텍터 — 합계 표시 순서이기도 하다 */
+const FREE_EXERCISES: ExerciseId[] = [
+  'squat',
+  'pushup',
+  'pullup',
+  'row',
+  'plank',
+  'sideplank',
+  'singleleg',
+  'deadhang',
+];
 
 /**
  * 스쿼트 바닥 진입 후 이 시간이 지나 올라온 rep 은 무시한다.
@@ -22,6 +38,26 @@ const FREE_EXERCISES: ExerciseId[] = ['squat', 'pushup', 'pullup'];
  * 실제 스쿼트는 바닥에 2초 이상 머물지 않는다.
  */
 const SQUAT_MAX_BOTTOM_MS = 4000;
+
+/**
+ * rep 운동이 움직인 직후에는 hold 시간을 쌓지 않는다.
+ * 푸시업 위 자세는 플랭크와, 풀업 사이 매달림은 데드행과 포즈만으로 구분되지 않아
+ * "움직임이 있으면 rep, 멈춰 있으면 hold" 로 나눈다.
+ */
+const HOLD_QUIET_MS = 3000;
+
+/** 이보다 짧은 hold 는 로그에 올리지 않는다 — 자세 전환 중 스치는 시간을 걸러낸다 */
+const HOLD_MIN_MS = 3000;
+
+/** 프레임 루프에서 화면 갱신 최소 간격 */
+const UI_INTERVAL_MS = 250;
+
+interface HoldTrack {
+  /** 이번 hold 에서 쌓인 ms (로그 반영 전 포함) */
+  ms: number;
+  /** HOLD_MIN_MS 를 넘겨 로그에 올라갔는지 */
+  committed: boolean;
+}
 
 export default function FreeScreen() {
   const router = useRouter();
@@ -31,6 +67,10 @@ export default function FreeScreen() {
   const engineRef = useRef<PoseEngine | null>(null);
   const detectorsRef = useRef<{ id: ExerciseId; det: ExerciseDetector }[]>([]);
   const bottomAtRef = useRef<Partial<Record<ExerciseId, number>>>({});
+  const holdRef = useRef<Partial<Record<ExerciseId, HoldTrack>>>({});
+  const lastMotionTRef = useRef(-Infinity);
+  const lastFrameTRef = useRef<number | null>(null);
+  const lastUiTRef = useRef(0);
   const freeLogRef = useRef<FreeLog>(EMPTY_LOG);
   const pausedRef = useRef(false);
 
@@ -48,26 +88,71 @@ export default function FreeScreen() {
     const video = videoRef.current;
     const canvas = canvasRef.current;
     if (canvas && video) drawPose(canvas, video, frame, frame.lm.length ? 'good' : 'idle');
-    if (pausedRef.current) return;
+    if (pausedRef.current) {
+      lastFrameTRef.current = null;
+      return;
+    }
+    // 탭 전환/일시정지 후 큰 시간 점프는 100ms로 캡
+    const dt = lastFrameTRef.current == null ? 0 : Math.min(frame.t - lastFrameTRef.current, 100);
+    lastFrameTRef.current = frame.t;
+
+    let log = freeLogRef.current;
+    let segmentsChanged = false;
+
+    const commit = (next: FreeLog) => {
+      if (startedNewSegment(log, next)) segmentsChanged = true;
+      log = next;
+    };
 
     for (const { id, det } of detectorsRef.current) {
-      for (const e of det.update(frame)) {
-        if (e.type === 'phase' && e.phase === 'bottom') {
-          bottomAtRef.current[id] = frame.t;
-          ding();
-        } else if (e.type === 'rep') {
-          const bottomAt = bottomAtRef.current[id];
-          if (id === 'squat' && bottomAt != null && frame.t - bottomAt > SQUAT_MAX_BOTTOM_MS) {
-            continue;
+      const events = det.update(frame);
+      if (det.kind === 'rep') {
+        for (const e of events) {
+          if (e.type === 'phase' && e.phase === 'bottom') {
+            bottomAtRef.current[id] = frame.t;
+            lastMotionTRef.current = frame.t;
+            ding();
+          } else if (e.type === 'rep') {
+            lastMotionTRef.current = frame.t;
+            const bottomAt = bottomAtRef.current[id];
+            if (id === 'squat' && bottomAt != null && frame.t - bottomAt > SQUAT_MAX_BOTTOM_MS) {
+              continue;
+            }
+            const before = log;
+            commit(addRep(before, id));
+            const count = log.segments[log.segments.length - 1].value;
+            const name = startedNewSegment(before, log) ? `${EXERCISES[id].nameKo}, ` : '';
+            speak(`${name}${koCount(count)}`, 'count');
           }
-          const before = freeLogRef.current;
-          const after = addRep(before, id);
-          freeLogRef.current = after;
-          setFreeLog(after);
-          const count = after.segments[after.segments.length - 1].count;
-          const name = startedNewSegment(before, after) ? `${EXERCISES[id].nameKo}, ` : '';
-          speak(`${name}${koCount(count)}`, 'count');
         }
+        continue;
+      }
+
+      // hold 운동: 자세 유지 중이고 rep 움직임이 잠잠할 때만 시간을 쌓는다
+      const track = (holdRef.current[id] ??= { ms: 0, committed: false });
+      const quiet = frame.t - lastMotionTRef.current > HOLD_QUIET_MS;
+      if (det.state().holding && quiet) {
+        track.ms += dt;
+        if (!track.committed && track.ms >= HOLD_MIN_MS) {
+          track.committed = true;
+          commit(addHoldMs(log, id, track.ms));
+          speak(`${EXERCISES[id].nameKo} 시작`);
+        } else if (track.committed && dt > 0) {
+          commit(addHoldMs(log, id, dt));
+        }
+      } else if (track.ms > 0) {
+        if (track.committed) {
+          speak(`${EXERCISES[id].nameKo} ${Math.floor(track.ms / 1000)}초`);
+        }
+        holdRef.current[id] = { ms: 0, committed: false };
+      }
+    }
+
+    if (log !== freeLogRef.current) {
+      freeLogRef.current = log;
+      if (segmentsChanged || frame.t - lastUiTRef.current > UI_INTERVAL_MS) {
+        lastUiTRef.current = frame.t;
+        setFreeLog(log);
       }
     }
   }, []);
@@ -100,7 +185,7 @@ export default function FreeScreen() {
     requestWakeLock();
     setStarted(true);
     setLoading(false);
-    speak('자유 운동 시작. 스쿼트, 푸시업, 풀업을 인식합니다');
+    speak('자유 운동 시작. 동작을 알아서 구분해 셉니다');
   };
 
   // 새 구간이 추가되면 로그를 맨 아래로
@@ -119,6 +204,8 @@ export default function FreeScreen() {
     };
   }, []);
 
+  const activeTotals = FREE_EXERCISES.filter((id) => (freeLog.totals[id] ?? 0) > 0);
+
   return (
     <div className="fixed inset-0 overflow-hidden bg-neutral-950 text-neutral-100">
       <video
@@ -135,7 +222,8 @@ export default function FreeScreen() {
           <div className="mb-4 text-6xl">🏃</div>
           <h1 className="mb-2 text-3xl font-black">자유 운동</h1>
           <p className="mb-8 max-w-sm text-neutral-400">
-            루틴 없이 하고 싶은 대로 움직이세요. 스쿼트·푸시업·풀업을 알아서 구분해 셉니다.
+            루틴 없이 하고 싶은 대로 움직이세요. 스쿼트·푸시업·풀업·로우는 횟수로, 플랭크·사이드
+            플랭크·한발 서기·데드행은 초로 알아서 셉니다.
           </p>
           {camError && <p className="mb-4 font-semibold text-red-400">{camError}</p>}
           <button
@@ -150,18 +238,22 @@ export default function FreeScreen() {
 
       {started && (
         <>
-          {/* 상단 고정 합계 */}
-          <div className="absolute inset-x-0 top-0 z-10 flex justify-center gap-5 bg-gradient-to-b from-black/80 to-transparent px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-6">
-            {FREE_EXERCISES.map((id) => (
-              <div key={id} className="text-center">
-                <div className="text-sm text-neutral-300">
-                  {EXERCISES[id].cameraIcon} {EXERCISES[id].nameKo}
+          {/* 상단 고정 합계 — 한 번이라도 잡힌 운동만 */}
+          <div className="absolute inset-x-0 top-0 z-10 flex flex-wrap justify-center gap-x-5 gap-y-1 bg-gradient-to-b from-black/80 to-transparent px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-6">
+            {activeTotals.length === 0 ? (
+              <p className="text-neutral-300">움직이면 합계가 표시됩니다</p>
+            ) : (
+              activeTotals.map((id) => (
+                <div key={id} className="text-center">
+                  <div className="text-sm text-neutral-300">
+                    {EXERCISES[id].cameraIcon} {EXERCISES[id].nameKo}
+                  </div>
+                  <div className="text-4xl font-black tabular-nums text-green-400 drop-shadow">
+                    {formatValue(EXERCISES[id].kind, freeLog.totals[id] ?? 0)}
+                  </div>
                 </div>
-                <div className="text-5xl font-black tabular-nums text-green-400 drop-shadow">
-                  {freeLog.totals[id] ?? 0}
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </div>
 
           {/* 하단 구간 로그 — 새 구간마다 자동 스크롤 */}
@@ -180,7 +272,7 @@ export default function FreeScreen() {
                     <span>
                       {EXERCISES[seg.exerciseId].cameraIcon} {EXERCISES[seg.exerciseId].nameKo}
                     </span>
-                    <span>{seg.count}</span>
+                    <span>{formatValue(seg.kind, seg.value)}</span>
                   </div>
                 ))
               )}
