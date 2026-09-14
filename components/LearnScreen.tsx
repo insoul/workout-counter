@@ -16,6 +16,7 @@ import { PoseEngine } from '@/lib/pose/engine';
 import { primeBeep } from '@/lib/speech/beep';
 import { primeVoice, speak } from '@/lib/speech/voice';
 import { releaseWakeLock, requestWakeLock } from '@/lib/wakeLock';
+import LearnGuide from './LearnGuide';
 import PoseFigure from './PoseFigure';
 
 const EXERCISE_IDS = Object.keys(EXERCISES) as ExerciseId[];
@@ -73,6 +74,7 @@ export default function LearnScreen() {
   const [samples, setSamples] = useState<SampleMeta[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [notice, setNotice] = useState<string | null>(null);
+  const [guide, setGuide] = useState(false);
 
   const kind = kindOf(exercise);
 
@@ -230,7 +232,12 @@ export default function LearnScreen() {
       <div className="absolute inset-x-0 top-0 z-10 bg-gradient-to-b from-black/90 to-transparent px-3 pt-[max(0.75rem,env(safe-area-inset-top))] pb-8">
         <div className="mb-2 flex items-center justify-between">
           <h1 className="text-lg font-black">🎓 학습 모드</h1>
-          <Link href="/" className="text-xs text-neutral-400 underline">홈으로</Link>
+          <div className="flex items-center gap-3">
+            <button onClick={() => setGuide(true)} className="rounded-full bg-white/15 px-3 py-1 text-xs font-semibold">
+              ? 현황·안내
+            </button>
+            <Link href="/" className="text-xs text-neutral-400 underline">홈으로</Link>
+          </div>
         </div>
         <div className="flex gap-1.5 overflow-x-auto pb-1">
           {[...EXERCISE_IDS, 'none' as const].map((id) => (
@@ -281,6 +288,17 @@ export default function LearnScreen() {
           )}
           {samples.length > 0 && (
             <div className="max-h-[22vh] overflow-y-auto rounded-xl bg-black/50 p-2 text-xs">
+              <div className="mb-1 flex flex-wrap gap-x-3 text-neutral-400">
+                <span className="font-semibold text-neutral-200">{nameOf(exercise)} {samples.length}개</span>
+                {VIEWS.map((v) => {
+                  const n = samples.filter((s) => s.view === v.id).length;
+                  return n ? <span key={v.id}>{v.ko} {n}</span> : null;
+                })}
+                {HEIGHTS.map((h) => {
+                  const n = samples.filter((s) => s.height === h.id).length;
+                  return n ? <span key={h.id}>{h.ko} {n}</span> : null;
+                })}
+              </div>
               {samples
                 .slice()
                 .reverse()
@@ -297,6 +315,8 @@ export default function LearnScreen() {
           )}
         </div>
       )}
+
+      {guide && <LearnGuide counts={counts} onClose={() => setGuide(false)} />}
 
       {/* 검토: 구간 표시 + 저장 */}
       {review && (
