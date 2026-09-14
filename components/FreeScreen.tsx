@@ -11,11 +11,12 @@ import {
   addRep,
   EMPTY_LOG,
   formatValue,
+  isHoldSuppressed,
   startedNewSegment,
   type FreeLog,
 } from '@/lib/free/log';
 import { buildDebugBundle, shareDebugBundle } from '@/lib/free/debugBundle';
-import { captureSnapshot } from '@/lib/free/snapshot';
+import { captureSnapshot, type Snapshot } from '@/lib/free/snapshot';
 import { PoseEngine } from '@/lib/pose/engine';
 import { drawPose } from '@/lib/pose/draw';
 import { beaconSession, saveSession } from '@/lib/sessions/client';
@@ -60,8 +61,11 @@ const UI_INTERVAL_MS = 250;
 interface HoldTrack {
   /** 이번 hold 에서 쌓인 ms (로그 반영 전 포함) */
   ms: number;
-  /** HOLD_MIN_MS 를 넘겨 로그에 올라갔는지 */
-  committed: boolean;
+  /**
+   * pending: 아직 HOLD_MIN_MS 미만 · logged: 로그에 올라 시간을 계속 더하는 중 ·
+   * dropped: 직전 구간(예: 풀업)에 흡수돼 이번 hold 는 로그에 올리지 않음
+   */
+  state: 'pending' | 'logged' | 'dropped';
 }
 
 export default function FreeScreen() {
@@ -73,6 +77,8 @@ export default function FreeScreen() {
   const detectorsRef = useRef<{ id: ExerciseId; det: ExerciseDetector }[]>([]);
   const bottomAtRef = useRef<Partial<Record<ExerciseId, number>>>({});
   const holdRef = useRef<Partial<Record<ExerciseId, HoldTrack>>>({});
+  /** rep 디텍터별 "굽힘" 시점 증거 — 같은 rep 이 완성되면 구간에 붙이고 비운다 */
+  const pendingBottomRef = useRef<Partial<Record<ExerciseId, Snapshot>>>({});
   const lastMotionTRef = useRef(-Infinity);
   const lastFrameTRef = useRef<number | null>(null);
   const lastUiTRef = useRef(0);
@@ -182,6 +188,9 @@ export default function FreeScreen() {
           if (e.type === 'phase' && e.phase === 'bottom') {
             bottomAtRef.current[id] = frame.t;
             lastMotionTRef.current = frame.t;
+            if (debugRef.current) {
+              pendingBottomRef.current[id] = captureSnapshot(det, frame, startedAtRef.current, videoRef.current);
+            }
             ding();
           } else if (e.type === 'rep') {
             lastMotionTRef.current = frame.t;
@@ -191,11 +200,13 @@ export default function FreeScreen() {
             }
             const before = log;
             const last = before.segments[before.segments.length - 1];
+            const bottom = pendingBottomRef.current[id];
+            pendingBottomRef.current[id] = undefined;
             const snap =
               debugRef.current && last?.exerciseId !== id
                 ? captureSnapshot(det, frame, startedAtRef.current, videoRef.current)
                 : undefined;
-            commit(addRep(before, id, snap));
+            commit(addRep(before, id, snap, snap ? bottom : undefined));
             const count = log.segments[log.segments.length - 1].value;
             const name = startedNewSegment(before, log) ? `${EXERCISES[id].nameKo}, ` : '';
             speak(`${name}${koCount(count)}`, 'count');
@@ -205,25 +216,31 @@ export default function FreeScreen() {
       }
 
       // hold 운동: 자세 유지 중이고 rep 움직임이 잠잠할 때만 시간을 쌓는다
-      const track = (holdRef.current[id] ??= { ms: 0, committed: false });
+      const track = (holdRef.current[id] ??= { ms: 0, state: 'pending' });
       const quiet = frame.t - lastMotionTRef.current > HOLD_QUIET_MS;
       if (det.state().holding && quiet) {
         track.ms += dt;
-        if (!track.committed && track.ms >= HOLD_MIN_MS) {
-          track.committed = true;
-          const snap = debugRef.current
-            ? captureSnapshot(det, frame, startedAtRef.current, videoRef.current)
-            : undefined;
-          commit(addHoldMs(log, id, track.ms, snap));
-          speak(`${EXERCISES[id].nameKo} 시작`);
-        } else if (track.committed && dt > 0) {
-          commit(addHoldMs(log, id, dt));
+        if (track.state === 'pending' && track.ms >= HOLD_MIN_MS) {
+          if (isHoldSuppressed(log, id)) {
+            track.state = 'dropped';
+          } else {
+            track.state = 'logged';
+            const snap = debugRef.current
+              ? captureSnapshot(det, frame, startedAtRef.current, videoRef.current)
+              : undefined;
+            commit(addHoldMs(log, id, track.ms, snap));
+            speak(`${EXERCISES[id].nameKo} 시작`);
+          }
+        } else if (track.state === 'logged' && dt > 0) {
+          // 로그에 오른 뒤 풀업이 시작돼 데드행 구간이 지워졌으면 더 쌓지 않는다
+          if (isHoldSuppressed(log, id)) track.state = 'dropped';
+          else commit(addHoldMs(log, id, dt));
         }
       } else if (track.ms > 0) {
-        if (track.committed) {
+        if (track.state === 'logged') {
           speak(`${EXERCISES[id].nameKo} ${Math.floor(track.ms / 1000)}초`);
         }
-        holdRef.current[id] = { ms: 0, committed: false };
+        holdRef.current[id] = { ms: 0, state: 'pending' };
       }
     }
 

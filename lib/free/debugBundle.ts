@@ -2,6 +2,7 @@ import { EXERCISES } from '@/lib/detectors/registry';
 import { POSE_EDGES } from '@/lib/pose/landmarks';
 import { buildZip, type ZipEntry } from '@/lib/zip';
 import type { Segment } from './log';
+import type { Snapshot } from './snapshot';
 
 /**
  * 디버그 묶음: 한 폴더에 사진(JPEG)·세션 데이터(JSON)·뷰어(index.html)를 넣은 ZIP.
@@ -39,7 +40,8 @@ function viewerHtml(data: unknown): string {
 <style>
 body{margin:0;padding:24px;background:#0a0a0a;color:#e5e5e5;font:14px/1.5 -apple-system,system-ui,sans-serif}
 h1{font-size:20px;margin:0 0 4px}.meta{color:#a3a3a3;margin-bottom:20px}
-.entry{display:grid;grid-template-columns:320px 1fr;gap:16px;margin-bottom:24px;padding:16px;background:#171717;border-radius:12px}
+.entry{display:grid;grid-template-columns:auto 1fr;gap:16px;margin-bottom:24px;padding:16px;background:#171717;border-radius:12px}
+.shots{display:flex;gap:8px;flex-wrap:wrap}.shotbox{width:320px}.cap{font-size:12px;color:#a3a3a3;margin:0 0 4px}
 .shot{position:relative;width:320px;background:#000;border-radius:8px;overflow:hidden}
 .shot img{display:block;width:320px}.shot svg{position:absolute;inset:0;width:100%;height:100%}
 .title{font-size:18px;font-weight:700}.val{color:#4ade80;font-weight:700}
@@ -57,11 +59,12 @@ const d=JSON.parse(document.getElementById('data').textContent);
 const fmt=(k,v)=>k==='rep'?v+'회':Math.floor(v/1000)+'초';
 document.getElementById('meta').textContent=new Date(d.startedAt).toLocaleString('ko-KR')+' · '+Math.round((d.endedAt-d.startedAt)/60000)+'분 · 구간 '+d.segments.length+'개';
 const root=document.getElementById('entries');
-d.segments.forEach((s,i)=>{
-  const el=document.createElement('div');el.className='entry';
+const detHtml=o=>'<div class="det">'+Object.entries(o||{}).map(([k,v])=>'<span>'+k+'='+v+'</span>').join('')+'</div>';
+function shotOf(dbg,caption){
+  const box=document.createElement('div');box.className='shotbox';
+  box.innerHTML='<p class="cap">'+caption+' · '+(dbg.at!=null?Math.round(dbg.at/1000)+'초':'?')+'</p>';
   const shot=document.createElement('div');shot.className='shot';
   const img=document.createElement('img');
-  const dbg=s.debug||{};
   const draw=()=>{
     if(!dbg.lm){shot.insertAdjacentHTML('beforeend','<div class="nolm" style="padding:12px">랜드마크 없음</div>');return}
     const w=320,h=Math.round(320*(img.naturalHeight||3)/(img.naturalWidth||4));shot.style.height=h+'px';
@@ -73,11 +76,19 @@ d.segments.forEach((s,i)=>{
     shot.insertAdjacentHTML('beforeend',svg+'</svg>');
   };
   if(dbg.photo){img.src=dbg.photo;img.onload=draw;img.onerror=()=>{img.remove();draw()};shot.appendChild(img)}else{img.remove();shot.style.height='240px';draw()}
+  box.appendChild(shot);box.insertAdjacentHTML('beforeend',detHtml(dbg.det));
+  return box;
+}
+d.segments.forEach((s,i)=>{
+  const el=document.createElement('div');el.className='entry';
+  const shots=document.createElement('div');shots.className='shots';
+  const isRep=(KINDS[s.exerciseId]||s.kind)==='rep';
+  if(s.bottom)shots.appendChild(shotOf(s.bottom,'굽힘(바닥)'));
+  if(s.debug)shots.appendChild(shotOf(s.debug,isRep?'폄(카운트)':'3초 도달(기록)'));
   const info=document.createElement('div');
   info.innerHTML='<div class="title">'+(i+1)+'. '+(NAMES[s.exerciseId]||s.exerciseId)+' <span class="val">'+fmt(KINDS[s.exerciseId]||s.kind,s.value)+'</span></div>'
-    +'<div class="at">시작 후 '+(dbg.at!=null?Math.round(dbg.at/1000)+'초':'?')+' 시점 — 구간이 처음 기록된 순간</div>'
-    +'<div class="det">'+Object.entries(dbg.det||{}).map(([k,v])=>k+'='+v).join('</span><span>').replace(/^/,'<span>').replace(/$/,'</span>')+'</div>';
-  el.append(shot,info);root.appendChild(el);
+    +'<div class="at">'+(isRep?'첫 rep 의 굽힘·폄 두 시점':'기록에 오른 순간')+'</div>';
+  el.append(shots,info);root.appendChild(el);
 });
 </script></body></html>`;
 }
@@ -86,16 +97,23 @@ d.segments.forEach((s,i)=>{
 export function buildDebugBundle(input: DebugBundleInput): File {
   const folder = `workout-debug-${stamp(input.startedAt)}`;
   const entries: ZipEntry[] = [];
-  const segments = input.segments.map((s, i) => {
-    const photoName = s.debug?.photo ? `entry-${String(i).padStart(2, '0')}.jpg` : undefined;
-    if (photoName && s.debug?.photo) {
-      entries.push({ name: `${folder}/${photoName}`, data: dataUrlToBytes(s.debug.photo) });
+  const pack = (snap: Snapshot | undefined, name: string) => {
+    if (!snap) return undefined;
+    let photo: string | undefined;
+    if (snap.photo) {
+      photo = `${name}.jpg`;
+      entries.push({ name: `${folder}/${photo}`, data: dataUrlToBytes(snap.photo) });
     }
+    return { at: snap.at, det: snap.det, lm: snap.lm, photo };
+  };
+  const segments = input.segments.map((s, i) => {
+    const n = String(i).padStart(2, '0');
     return {
       exerciseId: s.exerciseId,
       kind: s.kind,
       value: s.value,
-      debug: s.debug ? { at: s.debug.at, det: s.debug.det, lm: s.debug.lm, photo: photoName } : undefined,
+      debug: pack(s.debug, `entry-${n}`),
+      bottom: pack(s.bottom, `entry-${n}-bottom`),
     };
   });
   const data = { startedAt: input.startedAt, endedAt: input.endedAt, segments };
