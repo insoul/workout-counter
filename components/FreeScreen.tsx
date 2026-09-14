@@ -5,7 +5,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { EXERCISES, type ExerciseId } from '@/lib/detectors/registry';
 import type { DetectorState, ExerciseDetector, PoseFrame } from '@/lib/detectors/types';
 import { startCamera, stopCamera } from '@/lib/camera';
-import { isDebugEnabled } from '@/lib/debug';
+import { isDebugEnabled, isRulesForced } from '@/lib/debug';
+import { createDetectorFor } from '@/lib/detectors/factory';
+import { loadDataset } from '@/lib/learned/client';
 import {
   addHoldMs,
   addRep,
@@ -82,6 +84,7 @@ export default function FreeScreen() {
   const logRef = useRef<HTMLDivElement>(null);
   const engineRef = useRef<PoseEngine | null>(null);
   const detectorsRef = useRef<{ id: ExerciseId; det: ExerciseDetector }[]>([]);
+  const learnedCountRef = useRef(0);
   const bottomAtRef = useRef<Partial<Record<ExerciseId, number>>>({});
   const holdRef = useRef<Partial<Record<ExerciseId, HoldTrack>>>({});
   /** rep 디텍터별 "굽힘" 시점 증거 — 같은 rep 이 완성되면 구간에 붙이고 비운다 */
@@ -303,7 +306,14 @@ export default function FreeScreen() {
       const engine = new PoseEngine();
       await engine.init(videoRef.current!);
       engineRef.current = engine;
-      detectorsRef.current = FREE_EXERCISES.map((id) => ({ id, det: EXERCISES[id].create() }));
+      // 샘플이 충분한 운동은 학습 디텍터로. 못 받으면(오프라인·미로그인) 전부 규칙 디텍터
+      const loaded = await loadDataset();
+      const forceRules = isRulesForced();
+      detectorsRef.current = FREE_EXERCISES.map((id) => ({
+        id,
+        det: createDetectorFor(id, loaded?.ds ?? null, loaded?.counts ?? {}, forceRules),
+      }));
+      learnedCountRef.current = detectorsRef.current.filter(({ det }) => det.state().debug.mode === 'learned').length;
       engine.start(onFrame);
     } catch (e) {
       console.error(e);
@@ -316,7 +326,8 @@ export default function FreeScreen() {
     setLoading(false);
     sessionIdRef.current = crypto.randomUUID();
     startedAtRef.current = Date.now();
-    speak('자유 운동 시작. 동작을 알아서 구분해 셉니다');
+    const n = learnedCountRef.current;
+    speak(n ? `자유 운동 시작. 학습한 동작 ${n}개를 포함해 알아서 구분해 셉니다` : '자유 운동 시작. 동작을 알아서 구분해 셉니다');
   };
 
   // 새 구간이 추가되면 로그를 맨 아래로

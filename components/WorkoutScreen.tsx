@@ -4,7 +4,10 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { EXERCISES } from '@/lib/detectors/registry';
 import type { DetectorState, ExerciseDetector, PoseFrame } from '@/lib/detectors/types';
 import { startCamera, stopCamera } from '@/lib/camera';
-import { isDebugEnabled } from '@/lib/debug';
+import { isDebugEnabled, isRulesForced } from '@/lib/debug';
+import { createDetectorFor } from '@/lib/detectors/factory';
+import { loadDataset } from '@/lib/learned/client';
+import type { Dataset } from '@/lib/learned/knn';
 import { PoseEngine } from '@/lib/pose/engine';
 import { drawPose, type PoseStatus } from '@/lib/pose/draw';
 import { fullBodyCheck } from '@/lib/pose/fullBodyCheck';
@@ -38,6 +41,8 @@ export default function WorkoutScreen({ steps }: { steps: RoutineStep[] }) {
   const holdAnnouncedRef = useRef(false);
   const lastHudRef = useRef(0);
   const startedAtRef = useRef(0);
+  /** 운동 시작 때 한 번 받은 학습 데이터셋 — 세트마다 디텍터를 새로 만들 때 쓴다 */
+  const datasetRef = useRef<{ ds: Dataset; counts: Record<string, number> } | null>(null);
 
   const [started, setStarted] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -57,8 +62,9 @@ export default function WorkoutScreen({ steps }: { steps: RoutineStep[] }) {
   // 세트 시작(카운트다운 진입)마다 새 디텍터 생성
   useEffect(() => {
     if (state.phase !== 'countdown') return;
-    const m = EXERCISES[steps[state.stepIdx].exerciseId];
-    detectorRef.current = m.create();
+    const id = steps[state.stepIdx].exerciseId;
+    const loaded = datasetRef.current;
+    detectorRef.current = createDetectorFor(id, loaded?.ds ?? null, loaded?.counts ?? {}, isRulesForced());
     holdAnnouncedRef.current = false;
     setHud(detectorRef.current.state());
   }, [state.phase, state.stepIdx, state.setIdx, steps]);
@@ -168,6 +174,7 @@ export default function WorkoutScreen({ steps }: { steps: RoutineStep[] }) {
       setLoading(false);
       return;
     }
+    datasetRef.current = await loadDataset();
     requestWakeLock();
     setStarted(true);
     setLoading(false);
