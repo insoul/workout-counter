@@ -46,3 +46,8 @@ public/mediapipe/
 
 # conversation logs
 prompt-logs/
+
+# Vercel CLI가 Neon 연동 시 설치하는 에이전트 스킬 문서 — 앱과 무관
+.agents/
+.claude/skills/
+skills-lock.json
