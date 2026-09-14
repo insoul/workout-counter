@@ -2,6 +2,8 @@ import Link from "next/link";
 import { getSession, signOut } from "@/auth";
 import { EXERCISES } from "@/lib/detectors/registry";
 import { listRoutines, type RoutineRecord } from "@/lib/db";
+import { listSessions } from "@/lib/sessions/db";
+import { summarizeSession, type WorkoutSession } from "@/lib/sessions/types";
 import { DEFAULT_ITEMS, type RoutineItem } from "@/lib/routine/custom";
 import { targetLabel } from "@/lib/routine/format";
 
@@ -38,11 +40,12 @@ export default async function Home() {
   const userId = session?.user?.id;
 
   let routines: RoutineRecord[] = [];
+  let recent: WorkoutSession[] = [];
   if (userId) {
     try {
-      routines = await listRoutines(userId);
+      [routines, recent] = await Promise.all([listRoutines(userId), listSessions(userId, 3)]);
     } catch (e) {
-      console.error("[home] routine list failed", e);
+      console.error("[home] list failed", e);
     }
   }
   const latest = routines[0] ?? null;
@@ -96,6 +99,12 @@ export default async function Home() {
       >
         운동 시작
       </Link>
+      <Link
+        href="/free"
+        className="mt-3 rounded-3xl bg-white/10 py-4 text-center text-lg font-bold active:bg-white/20"
+      >
+        🏃 자유 운동 · 루틴 없이 알아서 카운트
+      </Link>
 
       {/* 나머지 루틴 목록 */}
       {userId && (
@@ -130,6 +139,39 @@ export default async function Home() {
               {latest
                 ? "다른 루틴이 없습니다. 새 루틴을 만들어 보세요."
                 : "저장된 루틴이 없습니다. 루틴을 만들면 여기에 표시됩니다."}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* 최근 운동 기록 */}
+      {userId && (
+        <div className="mt-10">
+          <div className="mb-2 flex items-center justify-between">
+            <h2 className="font-bold text-neutral-300">최근 운동</h2>
+            <Link href="/history" className="text-sm text-green-400 underline">
+              전체 기록
+            </Link>
+          </div>
+          {recent.length ? (
+            <div className="space-y-2">
+              {recent.map((s) => (
+                <div key={s.id} className="rounded-xl bg-white/5 px-4 py-3">
+                  <div className="text-sm text-neutral-400">
+                    {new Date(s.startedAt).toLocaleDateString("ko-KR", {
+                      month: "numeric",
+                      day: "numeric",
+                      weekday: "short",
+                    })}{" "}
+                    · {s.mode === "free" ? "자유 운동" : "루틴"}
+                  </div>
+                  <div className="text-sm">{summarizeSession(s.entries)}</div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-neutral-500">
+              운동을 마치면 기록이 여기에 쌓입니다.
             </p>
           )}
         </div>

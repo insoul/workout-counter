@@ -23,21 +23,42 @@ function NumberField({
   max: number;
   onChange: (v: number) => void;
 }) {
+  const step = (d: number) => onChange(Math.min(max, Math.max(min, value + d)));
   return (
     <label className="flex flex-col gap-1 text-xs text-neutral-400">
       {label}
-      <input
-        type="number"
-        inputMode="numeric"
-        value={value}
-        min={min}
-        max={max}
-        onChange={(e) => {
-          const v = Math.round(Number(e.target.value));
-          if (Number.isFinite(v)) onChange(Math.min(max, Math.max(min, v)));
-        }}
-        className="w-16 rounded-lg bg-white/10 px-2 py-2 text-center text-base font-semibold text-white"
-      />
+      <div className="flex items-center overflow-hidden rounded-lg bg-white/10">
+        <button
+          type="button"
+          aria-label={`${label} 감소`}
+          onClick={() => step(-1)}
+          disabled={value <= min}
+          className="px-3 py-2 text-lg text-white disabled:opacity-30"
+        >
+          −
+        </button>
+        <input
+          type="number"
+          inputMode="numeric"
+          value={value}
+          min={min}
+          max={max}
+          onChange={(e) => {
+            const v = Math.round(Number(e.target.value));
+            if (Number.isFinite(v)) onChange(Math.min(max, Math.max(min, v)));
+          }}
+          className="w-12 bg-transparent py-2 text-center text-base font-semibold text-white [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+        />
+        <button
+          type="button"
+          aria-label={`${label} 증가`}
+          onClick={() => step(1)}
+          disabled={value >= max}
+          className="px-3 py-2 text-lg text-white disabled:opacity-30"
+        >
+          +
+        </button>
+      </div>
     </label>
   );
 }
@@ -213,7 +234,7 @@ function RoutineBuilder() {
                   ✕
                 </button>
               </div>
-              <div className="flex items-end gap-4">
+              <div className="flex flex-wrap items-end gap-3">
                 <NumberField
                   label={meta.perSide ? '세트 (좌우 각)' : '세트'}
                   value={item.sets}
