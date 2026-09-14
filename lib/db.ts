@@ -17,7 +17,8 @@ export function dbAvailable(): boolean {
   return !!process.env.DATABASE_URL;
 }
 
-function db(): NeonQueryFunction<false, false> {
+/** 다른 저장소 모듈(lib/sessions/db.ts 등)도 같은 클라이언트를 공유한다 */
+export function db(): NeonQueryFunction<false, false> {
   sql ??= neon(process.env.DATABASE_URL!);
   return sql;
 }

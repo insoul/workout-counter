@@ -15,6 +15,8 @@ import {
 } from '@/lib/free/log';
 import { PoseEngine } from '@/lib/pose/engine';
 import { drawPose } from '@/lib/pose/draw';
+import { beaconSession, saveSession } from '@/lib/sessions/client';
+import type { SessionInput } from '@/lib/sessions/types';
 import { ding, primeBeep } from '@/lib/speech/beep';
 import { koCount } from '@/lib/speech/phrases.ko';
 import { primeVoice, speak } from '@/lib/speech/voice';
@@ -73,16 +75,54 @@ export default function FreeScreen() {
   const lastUiTRef = useRef(0);
   const freeLogRef = useRef<FreeLog>(EMPTY_LOG);
   const pausedRef = useRef(false);
+  const sessionIdRef = useRef('');
+  const startedAtRef = useRef(0);
+  const savedRef = useRef(false);
 
   const [started, setStarted] = useState(false);
   const [loading, setLoading] = useState(false);
   const [camError, setCamError] = useState<string | null>(null);
   const [paused, setPaused] = useState(false);
   const [freeLog, setFreeLog] = useState<FreeLog>(EMPTY_LOG);
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     pausedRef.current = paused;
   }, [paused]);
+
+  /** 저장 본문. 기록이 없거나 이미 저장했으면 null */
+  const buildSession = useCallback((): SessionInput | null => {
+    const { segments } = freeLogRef.current;
+    if (!segments.length || savedRef.current) return null;
+    return {
+      id: sessionIdRef.current,
+      mode: 'free',
+      startedAt: startedAtRef.current,
+      endedAt: Date.now(),
+      entries: segments.map((s) => ({ exerciseId: s.exerciseId, kind: s.kind, value: s.value })),
+    };
+  }, []);
+
+  const finish = async () => {
+    const input = buildSession();
+    if (input) {
+      setSaving(true);
+      const ok = await saveSession(input);
+      savedRef.current = ok;
+      setSaving(false);
+    }
+    router.push('/');
+  };
+
+  // 탭을 그냥 닫아도 기록이 남도록 — 같은 id 라 종료 버튼 저장과 겹쳐도 중복되지 않는다
+  useEffect(() => {
+    const onHide = () => {
+      const input = buildSession();
+      if (input) beaconSession(input);
+    };
+    window.addEventListener('pagehide', onHide);
+    return () => window.removeEventListener('pagehide', onHide);
+  }, [buildSession]);
 
   const onFrame = useCallback((frame: PoseFrame) => {
     const video = videoRef.current;
@@ -185,6 +225,8 @@ export default function FreeScreen() {
     requestWakeLock();
     setStarted(true);
     setLoading(false);
+    sessionIdRef.current = crypto.randomUUID();
+    startedAtRef.current = Date.now();
     speak('자유 운동 시작. 동작을 알아서 구분해 셉니다');
   };
 
@@ -285,10 +327,11 @@ export default function FreeScreen() {
                 {paused ? '▶ 재개' : '⏸ 일시정지'}
               </button>
               <button
-                onClick={() => router.push('/')}
-                className="rounded-xl bg-red-500/20 px-4 py-2.5 text-sm font-semibold text-red-300 backdrop-blur active:bg-red-500/40"
+                onClick={finish}
+                disabled={saving}
+                className="rounded-xl bg-red-500/20 px-4 py-2.5 text-sm font-semibold text-red-300 backdrop-blur active:bg-red-500/40 disabled:opacity-50"
               >
-                종료
+                {saving ? '저장 중…' : '종료'}
               </button>
             </div>
           </div>

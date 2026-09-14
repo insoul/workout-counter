@@ -12,7 +12,7 @@ import type { RoutineStep } from '@/lib/routine/types';
 import { ding, primeBeep } from '@/lib/speech/beep';
 import { koCount, koSide } from '@/lib/speech/phrases.ko';
 import { primeVoice, speak } from '@/lib/speech/voice';
-import { saveSession } from '@/lib/storage/progress';
+import { saveSession } from '@/lib/sessions/client';
 import { releaseWakeLock, requestWakeLock } from '@/lib/wakeLock';
 import ControlBar from './ControlBar';
 import DebugPanel from './DebugPanel';
@@ -36,6 +36,7 @@ export default function WorkoutScreen({ steps }: { steps: RoutineStep[] }) {
   const bodySinceRef = useRef<number | null>(null);
   const holdAnnouncedRef = useRef(false);
   const lastHudRef = useRef(0);
+  const startedAtRef = useRef(0);
 
   const [started, setStarted] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -169,6 +170,7 @@ export default function WorkoutScreen({ steps }: { steps: RoutineStep[] }) {
     requestWakeLock();
     setStarted(true);
     setLoading(false);
+    startedAtRef.current = Date.now();
     dispatch({ type: 'START' });
   };
 
@@ -188,7 +190,21 @@ export default function WorkoutScreen({ steps }: { steps: RoutineStep[] }) {
       speak(`${step.restSec}초 휴식`);
     } else if (state.phase === 'done') {
       speak('오늘 운동 완료. 수고하셨습니다');
-      saveSession(stateRef.current.results);
+      const results = stateRef.current.results;
+      if (results.length) {
+        void saveSession({
+          mode: 'routine',
+          startedAt: startedAtRef.current,
+          endedAt: Date.now(),
+          entries: results.map((r) => ({
+            exerciseId: r.exerciseId,
+            kind: EXERCISES[r.exerciseId].kind,
+            value: r.value,
+            setIdx: r.setIdx,
+            side: r.side,
+          })),
+        });
+      }
       releaseWakeLock();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
