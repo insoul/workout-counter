@@ -3,6 +3,7 @@ import type { ExerciseDetector } from './types';
 import { createSquatDetector } from './squat';
 import { createPushupDetector } from './pushup';
 import { createRowDetector } from './row';
+import { createPullupDetector } from './pullup';
 import { createDeadhangDetector } from './deadhang';
 import { createPlankDetector } from './plank';
 import { createSidePlankDetector } from './sidePlank';
@@ -12,6 +13,7 @@ export type ExerciseId =
   | 'squat'
   | 'pushup'
   | 'row'
+  | 'pullup'
   | 'deadhang'
   | 'plank'
   | 'sideplank'
@@ -73,6 +75,18 @@ export const EXERCISES: Record<ExerciseId, ExerciseMeta> = {
     ],
     manualAdjust: true,
     create: createRowDetector,
+  },
+  pullup: {
+    id: 'pullup',
+    nameKo: '풀업',
+    purposeKo: '등·이두',
+    kind: 'rep',
+    cameraSetupKo: '철봉과 매달린 전신이 모두 보이도록 폰을 3m 이상 멀리 두세요.',
+    cameraIcon: '🧗',
+    requiredChains: [
+      [LM.LEFT_SHOULDER, LM.RIGHT_SHOULDER, LM.LEFT_WRIST, LM.RIGHT_WRIST, LM.LEFT_HIP, LM.RIGHT_HIP],
+    ],
+    create: createPullupDetector,
   },
   deadhang: {
     id: 'deadhang',

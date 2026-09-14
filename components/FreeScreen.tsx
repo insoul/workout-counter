@@ -14,7 +14,7 @@ import { primeVoice, speak } from '@/lib/speech/voice';
 import { releaseWakeLock, requestWakeLock } from '@/lib/wakeLock';
 
 /** 동시에 돌리는 디텍터. 서로 자세 게이트가 있어 섞이지 않는 rep 운동만 */
-const FREE_EXERCISES: ExerciseId[] = ['squat', 'pushup'];
+const FREE_EXERCISES: ExerciseId[] = ['squat', 'pushup', 'pullup'];
 
 /**
  * 스쿼트 바닥 진입 후 이 시간이 지나 올라온 rep 은 무시한다.
@@ -100,7 +100,7 @@ export default function FreeScreen() {
     requestWakeLock();
     setStarted(true);
     setLoading(false);
-    speak('자유 운동 시작. 스쿼트와 푸시업을 인식합니다');
+    speak('자유 운동 시작. 스쿼트, 푸시업, 풀업을 인식합니다');
   };
 
   // 새 구간이 추가되면 로그를 맨 아래로
@@ -135,7 +135,7 @@ export default function FreeScreen() {
           <div className="mb-4 text-6xl">🏃</div>
           <h1 className="mb-2 text-3xl font-black">자유 운동</h1>
           <p className="mb-8 max-w-sm text-neutral-400">
-            루틴 없이 하고 싶은 대로 움직이세요. 스쿼트와 푸시업을 알아서 구분해 셉니다.
+            루틴 없이 하고 싶은 대로 움직이세요. 스쿼트·푸시업·풀업을 알아서 구분해 셉니다.
           </p>
           {camError && <p className="mb-4 font-semibold text-red-400">{camError}</p>}
           <button
@@ -151,7 +151,7 @@ export default function FreeScreen() {
       {started && (
         <>
           {/* 상단 고정 합계 */}
-          <div className="absolute inset-x-0 top-0 z-10 flex justify-center gap-6 bg-gradient-to-b from-black/80 to-transparent px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-6">
+          <div className="absolute inset-x-0 top-0 z-10 flex justify-center gap-5 bg-gradient-to-b from-black/80 to-transparent px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-6">
             {FREE_EXERCISES.map((id) => (
               <div key={id} className="text-center">
                 <div className="text-sm text-neutral-300">
