@@ -69,4 +69,17 @@ describe('sliceByReps', () => {
     expect(out[1].marks).toEqual({ start: 125 - cut, end: 160 - cut, bottom: 142 - cut });
     expect(out[1].frames[out[1].frames.length - 1]).toBe(frames[frames.length - 1]);
   });
+  it('회가 겹쳐도 표시값이 슬라이스 안에 있다', () => {
+    const frames = clip();
+    const out = sliceByReps(frames, [
+      { start: 80, end: 130, bottom: 100 },
+      { start: 120, end: 160, bottom: 140 },
+    ]);
+    for (const sl of out) {
+      expect(sl.marks.start).toBeGreaterThanOrEqual(0);
+      expect(sl.marks.end).toBeLessThan(sl.frames.length);
+      expect(sl.marks.bottom!).toBeGreaterThanOrEqual(sl.marks.start);
+      expect(sl.marks.bottom!).toBeLessThanOrEqual(sl.marks.end);
+    }
+  });
 });

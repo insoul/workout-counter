@@ -101,8 +101,10 @@ export function sliceByReps(
 ): { frames: number[][]; marks: SampleMarks }[] {
   const sorted = [...segments].sort((a, b) => a.start - b.start);
   return sorted.map((seg, i) => {
-    const from = i === 0 ? 0 : Math.floor((sorted[i - 1].end + seg.start) / 2) + 1;
-    const to = i === sorted.length - 1 ? frames.length - 1 : Math.floor((seg.end + sorted[i + 1].start) / 2);
+    // 회가 겹치면 잘린 자리가 구간 안으로 들어올 수 있으므로 구간을 온전히 품도록 넓힌다
+    const from = i === 0 ? 0 : Math.min(seg.start, Math.floor((sorted[i - 1].end + seg.start) / 2) + 1);
+    const to =
+      i === sorted.length - 1 ? frames.length - 1 : Math.max(seg.end, Math.floor((seg.end + sorted[i + 1].start) / 2));
     return {
       frames: frames.slice(from, to + 1),
       marks: {

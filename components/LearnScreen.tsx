@@ -278,30 +278,33 @@ export default function LearnScreen() {
 
   const lastFrame = review ? review.frames.length - 1 : 0;
   const fpsNow = review?.fps ?? 30;
-  /** 슬라이더가 다루는 창 — 앞 회의 끝 ~ 뒤 회의 시작, 그 안에서 선택한 회 앞뒤 2초 */
-  const window = (() => {
-    const pad = Math.round(2 * fpsNow);
-    const prev = segments[selected - 1];
-    const next = segments[selected + 1];
-    const lo = Math.max(prev ? prev.end + 1 : 0, marks.start - pad);
-    const hi = Math.min(next ? next.start - 1 : lastFrame, marks.end + pad);
-    return { lo, hi: Math.max(lo, hi) };
-  })();
+  /** rep 한 회의 최대 길이 — 바닥·끝 슬라이더는 시작부터 이 안에서만 움직인다 */
+  const REP_MAX = Math.round(3 * fpsNow);
+  /** 슬라이더 범위: 시작은 전체, 바닥·끝은 시작 이후(rep 은 시작+3초까지) */
+  const range = (key: 'start' | 'end' | 'bottom') =>
+    key === 'start'
+      ? { lo: 0, hi: lastFrame }
+      : { lo: marks.start, hi: kind === 'rep' ? Math.min(lastFrame, marks.start + REP_MAX) : lastFrame };
+  const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
 
   const setMark = (key: 'start' | 'end' | 'bottom', v: number) => {
     setSegments((segs) =>
       segs.map((m, i) => {
         if (i !== selected) return m;
-        const n = { ...m, [key]: Math.min(window.hi, Math.max(window.lo, v)) };
-        if (n.start > n.end) {
-          if (key === 'start') n.end = n.start;
-          else n.start = n.end;
+        const r = range(key);
+        const n = { ...m, [key]: clamp(v, r.lo, r.hi) };
+        // 시작을 옮기면 바닥·끝은 그대로 두되 시작 이후(rep 은 3초 안)로 밀어 넣는다
+        const endHi = kind === 'rep' ? Math.min(lastFrame, n.start + REP_MAX) : lastFrame;
+        n.end = clamp(n.end, n.start, endHi);
+        if (n.bottom !== undefined) {
+          if (key === 'bottom' && n.bottom > n.end) n.end = n.bottom;
+          n.bottom = clamp(n.bottom, n.start, n.end);
         }
-        if (n.bottom !== undefined) n.bottom = Math.min(Math.max(n.bottom, n.start), n.end);
         return n;
       }),
     );
   };
+  const overlapping = segments.some((m, i) => i > 0 && m.start <= segments[i - 1].end);
   const nudge = (key: 'start' | 'end' | 'bottom', d: number) => {
     setActive(key);
     setMark(key, (marks[key] ?? marks.start) + d);
@@ -534,9 +537,9 @@ export default function LearnScreen() {
                 </div>
                 <input
                   type="range"
-                  min={window.lo}
-                  max={window.hi}
-                  value={Math.min(window.hi, Math.max(window.lo, marks[k] ?? 0))}
+                  min={range(k).lo}
+                  max={range(k).hi}
+                  value={clamp(marks[k] ?? 0, range(k).lo, range(k).hi)}
                   onPointerDown={() => setActive(k)}
                   onChange={(e) => {
                     setActive(k);
@@ -548,7 +551,9 @@ export default function LearnScreen() {
             ))}
           {kind === 'rep' && (
             <div className="mb-2 flex items-center justify-between text-xs text-neutral-500">
-              <span>슬라이더 범위 {(window.lo / review.fps).toFixed(1)}~{(window.hi / review.fps).toFixed(1)}s (선택한 회 주변만)</span>
+              <span className={overlapping ? 'text-red-300' : ''}>
+                {overlapping ? '회가 서로 겹칩니다 — 시작·끝을 조정하세요' : '바닥·끝은 시작부터 3초 안에서 움직입니다'}
+              </span>
               {segments.length > 0 && (
                 <button onClick={removeSegment} className="text-red-300 underline">
                   {selected + 1}회 삭제
