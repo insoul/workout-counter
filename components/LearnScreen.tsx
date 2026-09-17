@@ -10,7 +10,16 @@ import { deleteSample, listSamples, saveSample } from '@/lib/learned/client';
 import { kindOf } from '@/lib/learned/compact';
 import { defaultMarks, labelSample } from '@/lib/learned/label';
 import { detectReps, sliceByReps } from '@/lib/learned/segment';
-import type { SampleExercise, SampleHeight, SampleMarks, SampleMeta, SampleView } from '@/lib/learned/types';
+import {
+  splitView,
+  type SampleExercise,
+  type SampleFacing,
+  type SampleHeight,
+  type SampleMarks,
+  type SampleMeta,
+  type SampleSide,
+  type SampleView,
+} from '@/lib/learned/types';
 import { MAX_FRAMES, MIN_FRAMES } from '@/lib/learned/validate';
 import { createFrameDrawer, startClip, waitForClip, type Clip, type ClipRecorder } from '@/lib/learned/clipRecorder';
 import { drawPose } from '@/lib/pose/draw';
@@ -22,22 +31,35 @@ import FrameStill from './FrameStill';
 import LearnGuide from './LearnGuide';
 
 const EXERCISE_IDS = Object.keys(EXERCISES) as ExerciseId[];
-const VIEWS: { id: SampleView; ko: string }[] = [
-  { id: 'front', ko: '정면' },
-  { id: 'left', ko: '왼쪽 측면' },
-  { id: 'right', ko: '오른쪽 측면' },
-  { id: 'diagonal', ko: '대각' },
+const SIDES: { id: SampleSide; ko: string }[] = [
+  { id: 'left', ko: '좌측' },
+  { id: 'center', ko: '중앙' },
+  { id: 'right', ko: '우측' },
+];
+const FACINGS: { id: SampleFacing; ko: string }[] = [
+  { id: 'front', ko: '앞' },
+  { id: 'back', ko: '뒤' },
 ];
 const HEIGHTS: { id: SampleHeight; ko: string }[] = [
-  { id: 'floor', ko: '바닥' },
+  { id: 'eye', ko: '위' },
   { id: 'waist', ko: '허리' },
-  { id: 'eye', ko: '눈높이' },
+  { id: 'floor', ko: '아래' },
 ];
+const ko = <T extends string>(list: { id: T; ko: string }[], id: T) => list.find((x) => x.id === id)?.ko ?? id;
+/** 목록 표시용: "앞·중앙·허리" */
+function placeLabel(s: { view: SampleView; height: SampleHeight }): string {
+  const { facing, side } = splitView(s.view);
+  return `${ko(FACINGS, facing)}·${ko(SIDES, side)}·${ko(HEIGHTS, s.height)}`;
+}
 const PREF_KEY = 'learn-pref';
 
-function readPref(): { view?: SampleView; height?: SampleHeight } {
+function readPref(): { side?: SampleSide; facing?: SampleFacing; height?: SampleHeight } {
   try {
-    return JSON.parse(localStorage.getItem(PREF_KEY) ?? '{}') as { view?: SampleView; height?: SampleHeight };
+    return JSON.parse(localStorage.getItem(PREF_KEY) ?? '{}') as {
+      side?: SampleSide;
+      facing?: SampleFacing;
+      height?: SampleHeight;
+    };
   } catch {
     return {};
   }
@@ -82,8 +104,10 @@ export default function LearnScreen() {
   const [segments, setSegments] = useState<SampleMarks[]>([]);
   const [selected, setSelected] = useState(0);
   const [active, setActive] = useState<'start' | 'end' | 'bottom'>('start');
-  const [view, setView] = useState<SampleView>(() => readPref().view ?? 'front');
+  const [side, setSide] = useState<SampleSide>(() => readPref().side ?? 'center');
+  const [facing, setFacing] = useState<SampleFacing>(() => readPref().facing ?? 'front');
   const [height, setHeight] = useState<SampleHeight>(() => readPref().height ?? 'waist');
+  const view: SampleView = `${facing}-${side}`;
   const [saving, setSaving] = useState(false);
   const [samples, setSamples] = useState<SampleMeta[]>([]);
   const [counts, setCounts] = useState<Record<string, number>>({});
@@ -233,7 +257,7 @@ export default function LearnScreen() {
     if (!review || !slices.length) return;
     setSaving(true);
     try {
-      localStorage.setItem(PREF_KEY, JSON.stringify({ view, height }));
+      localStorage.setItem(PREF_KEY, JSON.stringify({ side, facing, height }));
     } catch {
       // 무시
     }
@@ -402,8 +426,12 @@ export default function LearnScreen() {
             <div className="max-h-[22vh] overflow-y-auto rounded-xl bg-black/50 p-2 text-xs">
               <div className="mb-1 flex flex-wrap gap-x-3 text-neutral-400">
                 <span className="font-semibold text-neutral-200">{nameOf(exercise)} {samples.length}개</span>
-                {VIEWS.map((v) => {
-                  const n = samples.filter((s) => s.view === v.id).length;
+                {FACINGS.map((f) => {
+                  const n = samples.filter((s) => splitView(s.view).facing === f.id).length;
+                  return n ? <span key={f.id}>{f.ko} {n}</span> : null;
+                })}
+                {SIDES.map((v) => {
+                  const n = samples.filter((s) => splitView(s.view).side === v.id).length;
                   return n ? <span key={v.id}>{v.ko} {n}</span> : null;
                 })}
                 {HEIGHTS.map((h) => {
@@ -418,7 +446,7 @@ export default function LearnScreen() {
                   <div key={s.id} className="flex items-center justify-between py-1 text-neutral-300">
                     <span>
                       {new Date(s.createdAt).toLocaleTimeString('ko-KR', { hour: 'numeric', minute: '2-digit' })} ·{' '}
-                      {VIEWS.find((v) => v.id === s.view)?.ko} · {HEIGHTS.find((h) => h.id === s.height)?.ko} · {s.frameCount}f
+                      {placeLabel(s)} · {s.frameCount}f
                     </span>
                     <button onClick={() => remove(s)} className="text-red-300 underline">삭제</button>
                   </div>
@@ -432,7 +460,8 @@ export default function LearnScreen() {
 
       {/* 검토: 구간 표시 + 저장 */}
       {review && (
-        <div className="absolute inset-0 z-20 flex flex-col overflow-y-auto bg-neutral-950/95 p-4 pt-[max(1rem,env(safe-area-inset-top))]">
+        <div className="absolute inset-0 z-20 flex flex-col overflow-y-auto bg-neutral-950/95 p-4 pt-[max(1rem,env(safe-area-inset-top))] [&>*]:shrink-0">
+          {/* [&>*]:shrink-0 — 세로 flex 라 내용이 화면보다 길어지면 칩 줄·타임라인이 높이 0으로 찌그러진다 */}
           <h2 className="mb-2 text-xl font-black">
             {nameOf(exercise)} · {(review.frames.length / review.fps).toFixed(1)}초
             {kind === 'rep' && ` · ${segments.length}회`}
@@ -561,27 +590,31 @@ export default function LearnScreen() {
               )}
             </div>
           )}
-          <div className="mt-2 grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <div className="mb-1 text-neutral-400">카메라 각도</div>
-              <div className="flex flex-wrap gap-1">
-                {VIEWS.map((v) => (
-                  <button key={v.id} onClick={() => setView(v.id)} className={`rounded-lg px-2.5 py-1.5 ${view === v.id ? 'bg-green-500 text-black' : 'bg-white/10'}`}>
-                    {v.ko}
-                  </button>
-                ))}
+          {/* 카메라 위치 — 사람 기준 좌우 / 앞뒤 / 높이 */}
+          <div className="mt-2 space-y-1.5 text-sm">
+            <div className="mb-0.5 text-neutral-400">카메라 위치 (나를 기준으로)</div>
+            {(
+              [
+                { label: '좌우', items: SIDES, value: side, set: setSide as (v: string) => void },
+                { label: '앞뒤', items: FACINGS, value: facing, set: setFacing as (v: string) => void },
+                { label: '높이', items: HEIGHTS, value: height, set: setHeight as (v: string) => void },
+              ] as { label: string; items: { id: string; ko: string }[]; value: string; set: (v: string) => void }[]
+            ).map((row) => (
+              <div key={row.label} className="flex items-center gap-2">
+                <span className="w-8 shrink-0 text-xs text-neutral-500">{row.label}</span>
+                <div className="grid flex-1 grid-cols-3 gap-1">
+                  {row.items.map((it) => (
+                    <button
+                      key={it.id}
+                      onClick={() => row.set(it.id)}
+                      className={`rounded-lg py-1.5 ${row.value === it.id ? 'bg-green-500 text-black' : 'bg-white/10'}`}
+                    >
+                      {it.ko}
+                    </button>
+                  ))}
+                </div>
               </div>
-            </div>
-            <div>
-              <div className="mb-1 text-neutral-400">폰 높이</div>
-              <div className="flex flex-wrap gap-1">
-                {HEIGHTS.map((h) => (
-                  <button key={h.id} onClick={() => setHeight(h.id)} className={`rounded-lg px-2.5 py-1.5 ${height === h.id ? 'bg-green-500 text-black' : 'bg-white/10'}`}>
-                    {h.ko}
-                  </button>
-                ))}
-              </div>
-            </div>
+            ))}
           </div>
           <div className="mt-auto flex gap-2 pt-4 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
             <button onClick={() => setReview(null)} className="flex-1 rounded-2xl bg-white/10 py-4 font-bold">버리기</button>
