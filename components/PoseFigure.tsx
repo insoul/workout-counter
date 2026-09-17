@@ -10,21 +10,23 @@ export default function PoseFigure({
   width = 200,
   aspect = 4 / 3,
   className = '',
+  overlay = false,
 }: {
   row: number[] | null;
   width?: number;
   /** 세로/가로 비율 — 비디오 실제 비율을 넘기면 왜곡이 없다 */
   aspect?: number;
   className?: string;
+  /** true 면 배경 없이 부모를 꽉 채우는 겹침용 — 영상 프레임 위에 얹는다 */
+  overlay?: boolean;
 }) {
   const h = Math.round(width * aspect);
   const pt = (j: number) => (row ? { x: row[j * 4] * width, y: row[j * 4 + 1] * h, v: row[j * 4 + 3] } : null);
   return (
     <svg
       viewBox={`0 0 ${width} ${h}`}
-      width={width}
-      height={h}
-      className={`rounded-lg bg-black ${className}`}
+      {...(overlay ? {} : { width, height: h })}
+      className={overlay ? `absolute inset-0 h-full w-full ${className}` : `rounded-lg bg-black ${className}`}
     >
       {row &&
         POSE_EDGES.map(([a, b]) => {

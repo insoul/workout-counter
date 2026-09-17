@@ -11,13 +11,14 @@ import { kindOf } from '@/lib/learned/compact';
 import { defaultMarks, labelSample } from '@/lib/learned/label';
 import type { SampleExercise, SampleHeight, SampleMarks, SampleMeta, SampleView } from '@/lib/learned/types';
 import { MAX_FRAMES, MIN_FRAMES } from '@/lib/learned/validate';
+import { createFrameDrawer, startClip, waitForClip, type Clip, type ClipRecorder } from '@/lib/learned/clipRecorder';
 import { drawPose } from '@/lib/pose/draw';
 import { PoseEngine } from '@/lib/pose/engine';
 import { primeBeep } from '@/lib/speech/beep';
 import { primeVoice, speak } from '@/lib/speech/voice';
 import { releaseWakeLock, requestWakeLock } from '@/lib/wakeLock';
+import FrameStill from './FrameStill';
 import LearnGuide from './LearnGuide';
-import PoseFigure from './PoseFigure';
 
 const EXERCISE_IDS = Object.keys(EXERCISES) as ExerciseId[];
 const VIEWS: { id: SampleView; ko: string }[] = [
@@ -47,15 +48,25 @@ function nameOf(id: SampleExercise): string {
 
 interface Recording {
   frames: number[][];
+  /** 프레임별 performance.now() — 영상 시각과 맞추는 데만 쓰고 저장하지 않는다 */
+  ts: number[];
   fps: number;
   aspect: number;
+  /** 녹화 구간 영상(메모리). 지원 안 되거나 실패하면 null */
+  clip: Clip | null;
 }
+
+const MARK_LABEL = { start: '시작', bottom: '바닥', end: '끝' } as const;
 
 export default function LearnScreen() {
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const engineRef = useRef<PoseEngine | null>(null);
-  const recordingRef = useRef<{ frames: number[][]; t0: number; lastT: number } | null>(null);
+  const recordingRef = useRef<{ frames: number[][]; ts: number[]; t0: number; lastT: number; clip: ClipRecorder | null } | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
+  const clipVideoRef = useRef<HTMLVideoElement>(null);
+  /** seek 준비가 끝난 영상과 그 프레임 그리기 함수 — 현재 검토 영상과 같을 때만 쓴다 */
+  const [ready, setReady] = useState<{ url: string; draw: (time: number, canvas: HTMLCanvasElement) => Promise<boolean> } | null>(null);
   /** 프레임 루프(useCallback)에서 최신 finishRecording 을 부르기 위한 우회 */
   const finishRef = useRef<() => void>(() => {});
 
@@ -106,6 +117,7 @@ export default function LearnScreen() {
     if (canvas && video) drawPose(canvas, video, frame, rec ? 'good' : frame.lm.length ? 'idle' : 'warn');
     if (!rec) return;
     rec.frames.push(frameToRow(frame));
+    rec.ts.push(frame.t);
     rec.lastT = frame.t;
     if (rec.frames.length % 5 === 0) setElapsed(Math.round((frame.t - rec.t0) / 100) / 10);
     if (rec.frames.length >= MAX_FRAMES) finishRef.current();
@@ -117,7 +129,7 @@ export default function LearnScreen() {
     primeVoice();
     primeBeep();
     try {
-      await startCamera(videoRef.current!);
+      streamRef.current = await startCamera(videoRef.current!);
       const engine = new PoseEngine();
       await engine.init(videoRef.current!);
       engineRef.current = engine;
@@ -134,7 +146,8 @@ export default function LearnScreen() {
   };
 
   const startRecording = () => {
-    recordingRef.current = { frames: [], t0: performance.now(), lastT: performance.now() };
+    const clip = streamRef.current ? startClip(streamRef.current) : null;
+    recordingRef.current = { frames: [], ts: [], t0: performance.now(), lastT: performance.now(), clip };
     setElapsed(0);
     setRecording(true);
     speak('녹화 시작', 'count');
@@ -146,6 +159,7 @@ export default function LearnScreen() {
     setRecording(false);
     if (!rec) return;
     if (rec.frames.length < MIN_FRAMES) {
+      void rec.clip?.stop().then((c) => c && URL.revokeObjectURL(c.url));
       setNotice('너무 짧습니다. 1초 이상 녹화해 주세요.');
       return;
     }
@@ -153,8 +167,19 @@ export default function LearnScreen() {
     const fps = sec > 0 ? rec.frames.length / sec : 30;
     const video = videoRef.current;
     const aspect = video && video.videoWidth ? video.videoHeight / video.videoWidth : 4 / 3;
-    const r = { frames: rec.frames, fps: Math.round(fps * 10) / 10, aspect };
+    const r: Recording = { frames: rec.frames, ts: rec.ts, fps: Math.round(fps * 10) / 10, aspect, clip: null };
     setReview(r);
+    // 영상은 인코더가 끝나야 나온다 — 그동안은 관절만 보이고, 오면 정지화면이 채워진다
+    void rec.clip?.stop().then((clip) => {
+      if (!clip) return;
+      setReview((cur) => {
+        if (cur !== r) {
+          URL.revokeObjectURL(clip.url); // 이미 버리거나 저장한 뒤
+          return cur;
+        }
+        return { ...cur, clip };
+      });
+    });
     setMarks(defaultMarks(r.frames, kind));
     setActive(kind === 'rep' ? 'bottom' : 'start');
     speak('녹화 끝. 구간을 표시해 주세요');
@@ -163,6 +188,32 @@ export default function LearnScreen() {
   useEffect(() => {
     finishRef.current = finishRecording;
   });
+
+  // 검토 영상이 오면 seek 준비, 검토가 끝나면 메모리에서 버린다
+  const clipUrl = review?.clip?.url ?? null;
+  useEffect(() => {
+    if (!clipUrl) return;
+    let alive = true;
+    const video = clipVideoRef.current;
+    if (video) {
+      video.src = clipUrl;
+      void waitForClip(video).then((ok) => {
+        if (alive && ok) setReady({ url: clipUrl, draw: createFrameDrawer(video) });
+      });
+    }
+    return () => {
+      alive = false;
+      URL.revokeObjectURL(clipUrl);
+    };
+  }, [clipUrl]);
+  const drawer = clipUrl && ready?.url === clipUrl ? ready.draw : null;
+
+  /** 손잡이 프레임 → 영상 시각(초). 영상이 없으면 null */
+  const clipTime = (frame: number): number | null => {
+    if (!review?.clip) return null;
+    const t = review.ts[frame];
+    return t == null ? null : Math.max(0, (t - review.clip.t0) / 1000);
+  };
 
   const labelCounts = review
     ? labelSample({ id: 'preview', exerciseId: exercise, kind, fps: review.fps, frames: review.frames, marks }).reduce(
@@ -221,7 +272,7 @@ export default function LearnScreen() {
       return n;
     });
   };
-  const activeFrame = review ? (marks[active] ?? marks.start) : 0;
+  const markKeys = (['start', 'bottom', 'end'] as const).filter((k) => k !== 'bottom' || kind === 'rep');
 
   return (
     <div className="fixed inset-0 overflow-hidden bg-neutral-950 text-neutral-100">
@@ -322,11 +373,27 @@ export default function LearnScreen() {
       {review && (
         <div className="absolute inset-0 z-20 flex flex-col overflow-y-auto bg-neutral-950/95 p-4 pt-[max(1rem,env(safe-area-inset-top))]">
           <h2 className="mb-2 text-xl font-black">{nameOf(exercise)} · {review.frames.length}프레임 · {review.fps}fps</h2>
-          <div className="mb-3 flex items-start gap-3">
-            <PoseFigure row={review.frames[activeFrame] ?? null} width={150} aspect={review.aspect} />
+          {/* 손잡이별 정지화면 — 영상 프레임 위에 관절. 누르면 그 손잡이가 활성 */}
+          <video ref={clipVideoRef} playsInline muted preload="auto" className="absolute h-px w-px opacity-0" />
+          <div className="mb-2 flex gap-2">
+            {markKeys.map((k) => (
+              <FrameStill
+                key={k}
+                label={MARK_LABEL[k]}
+                time={clipTime(marks[k] ?? marks.start)}
+                row={review.frames[marks[k] ?? marks.start] ?? null}
+                aspect={review.aspect}
+                active={active === k}
+                draw={drawer}
+                onClick={() => setActive(k)}
+              />
+            ))}
+          </div>
+          <div className="mb-3">
             <div className="text-sm text-neutral-300">
               <div className="mb-1">
                 손잡이를 움직여 구간을 잡으세요. 구간 밖은 <b>아무것도 아님</b>으로 저장됩니다.
+                {review.clip === null && ' (영상 준비 중이거나 이 브라우저는 영상 미리보기를 지원하지 않습니다)'}
               </div>
               {labelCounts && (
                 <div className="font-mono text-xs text-green-300">
@@ -338,12 +405,10 @@ export default function LearnScreen() {
               )}
             </div>
           </div>
-          {(['start', 'bottom', 'end'] as const)
-            .filter((k) => k !== 'bottom' || kind === 'rep')
-            .map((k) => (
+          {markKeys.map((k) => (
               <label key={k} className={`mb-2 block text-sm ${active === k ? 'text-white' : 'text-neutral-400'}`}>
                 <div className="flex justify-between">
-                  <span>{k === 'start' ? '시작' : k === 'end' ? '끝' : '바닥(가장 깊이 굽힌 순간)'}</span>
+                  <span>{k === 'bottom' ? '바닥(가장 깊이 굽힌 순간)' : MARK_LABEL[k]}</span>
                   <span className="font-mono">{((marks[k] ?? 0) / review.fps).toFixed(1)}s</span>
                 </div>
                 <input
