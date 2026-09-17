@@ -9,6 +9,7 @@ import type { PoseFrame } from '@/lib/detectors/types';
 import { deleteSample, listSamples, saveSample } from '@/lib/learned/client';
 import { kindOf } from '@/lib/learned/compact';
 import { defaultMarks, labelSample } from '@/lib/learned/label';
+import { detectReps, sliceByReps } from '@/lib/learned/segment';
 import type { SampleExercise, SampleHeight, SampleMarks, SampleMeta, SampleView } from '@/lib/learned/types';
 import { MAX_FRAMES, MIN_FRAMES } from '@/lib/learned/validate';
 import { createFrameDrawer, startClip, waitForClip, type Clip, type ClipRecorder } from '@/lib/learned/clipRecorder';
@@ -77,7 +78,9 @@ export default function LearnScreen() {
   const [recording, setRecording] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [review, setReview] = useState<Recording | null>(null);
-  const [marks, setMarks] = useState<SampleMarks>({ start: 0, end: 0 });
+  /** 한 녹화 안의 회들. hold·none 은 항상 하나 */
+  const [segments, setSegments] = useState<SampleMarks[]>([]);
+  const [selected, setSelected] = useState(0);
   const [active, setActive] = useState<'start' | 'end' | 'bottom'>('start');
   const [view, setView] = useState<SampleView>(() => readPref().view ?? 'front');
   const [height, setHeight] = useState<SampleHeight>(() => readPref().height ?? 'waist');
@@ -120,7 +123,7 @@ export default function LearnScreen() {
     rec.ts.push(frame.t);
     rec.lastT = frame.t;
     if (rec.frames.length % 5 === 0) setElapsed(Math.round((frame.t - rec.t0) / 100) / 10);
-    if (rec.frames.length >= MAX_FRAMES) finishRef.current();
+    if (rec.frames.length >= MAX_FRAMES) finishRef.current(); // 60초 상한
   }, []);
 
   const startCam = async () => {
@@ -180,9 +183,11 @@ export default function LearnScreen() {
         return { ...cur, clip };
       });
     });
-    setMarks(defaultMarks(r.frames, kind));
+    const reps = kind === 'rep' && exercise !== 'none' ? detectReps(r.frames, r.fps, EXERCISES[exercise].requiredChains) : [];
+    setSegments(reps.length ? reps : [defaultMarks(r.frames, kind)]);
+    setSelected(0);
     setActive(kind === 'rep' ? 'bottom' : 'start');
-    speak('녹화 끝. 구간을 표시해 주세요');
+    speak(reps.length > 1 ? `녹화 끝. ${reps.length}회를 찾았습니다. 구간을 확인해 주세요` : '녹화 끝. 구간을 표시해 주세요');
   }
 
   useEffect(() => {
@@ -215,29 +220,39 @@ export default function LearnScreen() {
     return t == null ? null : Math.max(0, (t - review.clip.t0) / 1000);
   };
 
+  const marks: SampleMarks = segments[selected] ?? { start: 0, end: 0 };
+  /** 저장될 샘플들(회마다 하나) — 미리보기 라벨 수와 저장이 같은 슬라이스를 쓴다 */
+  const slices = review ? (kind === 'rep' ? sliceByReps(review.frames, segments) : [{ frames: review.frames, marks }]) : [];
   const labelCounts = review
-    ? labelSample({ id: 'preview', exerciseId: exercise, kind, fps: review.fps, frames: review.frames, marks }).reduce(
-        (acc, v) => ({ ...acc, [v.state]: (acc[v.state] ?? 0) + 1 }),
-        {} as Record<string, number>,
-      )
+    ? slices
+        .flatMap((sl, i) => labelSample({ id: `p${i}`, exerciseId: exercise, kind, fps: review.fps, frames: sl.frames, marks: sl.marks }))
+        .reduce((acc, v) => ({ ...acc, [v.state]: (acc[v.state] ?? 0) + 1 }), {} as Record<string, number>)
     : null;
 
   const save = async () => {
-    if (!review) return;
+    if (!review || !slices.length) return;
     setSaving(true);
     try {
       localStorage.setItem(PREF_KEY, JSON.stringify({ view, height }));
     } catch {
       // 무시
     }
-    const id = await saveSample({ exerciseId: exercise, view, height, fps: review.fps, frames: review.frames, marks });
+    let ok = 0;
+    for (const sl of slices) {
+      const id = await saveSample({ exerciseId: exercise, view, height, fps: review.fps, frames: sl.frames, marks: sl.marks });
+      if (id) ok++;
+    }
     setSaving(false);
-    if (!id) {
+    if (!ok) {
       setNotice('저장에 실패했습니다. 로그인 상태를 확인해 주세요.');
       return;
     }
     setReview(null);
-    setNotice(`${nameOf(exercise)} 샘플 저장 — 이제 ${(counts[exercise] ?? 0) + 1}개`);
+    setNotice(
+      ok < slices.length
+        ? `${ok}/${slices.length}개만 저장됐습니다`
+        : `${nameOf(exercise)} 샘플 ${ok}개 저장 — 이제 ${(counts[exercise] ?? 0) + ok}개`,
+    );
     void refresh(exercise);
   };
 
@@ -261,16 +276,59 @@ export default function LearnScreen() {
     };
   }, []);
 
+  const lastFrame = review ? review.frames.length - 1 : 0;
+  const fpsNow = review?.fps ?? 30;
+  /** 슬라이더가 다루는 창 — 앞 회의 끝 ~ 뒤 회의 시작, 그 안에서 선택한 회 앞뒤 2초 */
+  const window = (() => {
+    const pad = Math.round(2 * fpsNow);
+    const prev = segments[selected - 1];
+    const next = segments[selected + 1];
+    const lo = Math.max(prev ? prev.end + 1 : 0, marks.start - pad);
+    const hi = Math.min(next ? next.start - 1 : lastFrame, marks.end + pad);
+    return { lo, hi: Math.max(lo, hi) };
+  })();
+
   const setMark = (key: 'start' | 'end' | 'bottom', v: number) => {
-    setMarks((m) => {
-      const n = { ...m, [key]: v };
-      if (n.start > n.end) {
-        if (key === 'start') n.end = n.start;
-        else n.start = n.end;
-      }
-      if (n.bottom !== undefined) n.bottom = Math.min(Math.max(n.bottom, n.start), n.end);
-      return n;
-    });
+    setSegments((segs) =>
+      segs.map((m, i) => {
+        if (i !== selected) return m;
+        const n = { ...m, [key]: Math.min(window.hi, Math.max(window.lo, v)) };
+        if (n.start > n.end) {
+          if (key === 'start') n.end = n.start;
+          else n.start = n.end;
+        }
+        if (n.bottom !== undefined) n.bottom = Math.min(Math.max(n.bottom, n.start), n.end);
+        return n;
+      }),
+    );
+  };
+  const nudge = (key: 'start' | 'end' | 'bottom', d: number) => {
+    setActive(key);
+    setMark(key, (marks[key] ?? marks.start) + d);
+  };
+
+  /** 선택한 회 뒤에 비슷한 길이의 회를 놓는다. 자리가 없으면 안내 */
+  const addSegment = () => {
+    const lens = segments.map((m) => m.end - m.start);
+    const len = lens.length ? lens.sort((a, b) => a - b)[Math.floor(lens.length / 2)] : Math.round(1.5 * fpsNow);
+    const gap = Math.round(0.5 * fpsNow);
+    const after = segments[selected];
+    const next = segments[selected + 1];
+    const start = after ? after.end + gap : 0;
+    const limit = next ? next.start - 1 : lastFrame;
+    const end = Math.min(start + len, limit);
+    if (end - start < Math.round(0.3 * fpsNow)) {
+      setNotice('이 회 뒤에 자리가 없습니다. 마지막 회를 고른 뒤 추가하세요.');
+      return;
+    }
+    const seg: SampleMarks = { start, end, bottom: Math.round((start + end) / 2) };
+    setSegments((segs) => [...segs.slice(0, selected + 1), seg, ...segs.slice(selected + 1)]);
+    setSelected(selected + 1);
+    setActive('bottom');
+  };
+  const removeSegment = () => {
+    setSegments((segs) => segs.filter((_, i) => i !== selected));
+    setSelected((i) => Math.max(0, i - 1));
   };
   const markKeys = (['start', 'bottom', 'end'] as const).filter((k) => k !== 'bottom' || kind === 'rep');
 
@@ -318,7 +376,7 @@ export default function LearnScreen() {
             <>
               <p className="text-center text-sm text-neutral-300">
                 {kind === 'rep'
-                  ? '위 자세(선 자세·매달린 자세)에서 시작을 누르고 1회 한 뒤 완료를 누르세요.'
+                  ? '시작을 누르고 자리를 잡은 뒤 5~8회를 연속으로 하고 완료를 누르세요. 회마다 샘플이 됩니다.'
                   : kind === 'hold'
                     ? '자세를 잡고 시작을 누른 뒤 몇 초 버티고 완료를 누르세요.'
                     : '걷기, 자리 잡기, 철봉 잡으러 가기 같은 동작을 녹화하세요.'}
@@ -372,9 +430,68 @@ export default function LearnScreen() {
       {/* 검토: 구간 표시 + 저장 */}
       {review && (
         <div className="absolute inset-0 z-20 flex flex-col overflow-y-auto bg-neutral-950/95 p-4 pt-[max(1rem,env(safe-area-inset-top))]">
-          <h2 className="mb-2 text-xl font-black">{nameOf(exercise)} · {review.frames.length}프레임 · {review.fps}fps</h2>
-          {/* 손잡이별 정지화면 — 영상 프레임 위에 관절. 누르면 그 손잡이가 활성 */}
+          <h2 className="mb-2 text-xl font-black">
+            {nameOf(exercise)} · {(review.frames.length / review.fps).toFixed(1)}초
+            {kind === 'rep' && ` · ${segments.length}회`}
+          </h2>
           <video ref={clipVideoRef} playsInline muted preload="auto" className="absolute h-px w-px opacity-0" />
+
+          {kind === 'rep' && (
+            <>
+              {/* 회 선택 칩 */}
+              <div className="mb-2 flex gap-1.5 overflow-x-auto pb-1">
+                {segments.map((m, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      setSelected(i);
+                      setActive('bottom');
+                    }}
+                    className={`flex shrink-0 flex-col items-center rounded-lg px-3 py-1 text-xs leading-tight ${
+                      i === selected ? 'bg-green-500 text-black' : 'bg-white/10 text-neutral-300'
+                    }`}
+                  >
+                    <span className="font-bold">{i + 1}회</span>
+                    <span className="font-mono opacity-80">{(m.start / review.fps).toFixed(1)}s</span>
+                  </button>
+                ))}
+                <button onClick={addSegment} className="shrink-0 rounded-lg border border-dashed border-white/30 px-3 py-1 text-xs text-neutral-300">
+                  + 추가
+                </button>
+              </div>
+              {/* 전체 타임라인 — 선택용 */}
+              <div
+                className="relative mb-3 h-4 w-full overflow-hidden rounded bg-white/10"
+                onPointerDown={(e) => {
+                  const rect = e.currentTarget.getBoundingClientRect();
+                  const f = ((e.clientX - rect.left) / rect.width) * lastFrame;
+                  let best = 0;
+                  let bestD = Infinity;
+                  segments.forEach((m, i) => {
+                    const d = f < m.start ? m.start - f : f > m.end ? f - m.end : 0;
+                    if (d < bestD) {
+                      bestD = d;
+                      best = i;
+                    }
+                  });
+                  setSelected(best);
+                }}
+              >
+                {segments.map((m, i) => (
+                  <div
+                    key={i}
+                    className={`absolute inset-y-0 rounded-sm ${i === selected ? 'bg-green-500' : 'bg-neutral-500'}`}
+                    style={{ left: `${(m.start / lastFrame) * 100}%`, width: `${Math.max(0.5, ((m.end - m.start) / lastFrame) * 100)}%` }}
+                  />
+                ))}
+                {segments[selected]?.bottom !== undefined && (
+                  <div className="absolute inset-y-0 w-0.5 bg-black" style={{ left: `${(segments[selected].bottom! / lastFrame) * 100}%` }} />
+                )}
+              </div>
+            </>
+          )}
+
+          {/* 손잡이별 정지화면 — 영상 프레임 위에 관절. 누르면 그 손잡이가 활성 */}
           <div className="mb-2 flex gap-2">
             {markKeys.map((k) => (
               <FrameStill
@@ -392,7 +509,7 @@ export default function LearnScreen() {
           <div className="mb-3">
             <div className="text-sm text-neutral-300">
               <div className="mb-1">
-                손잡이를 움직여 구간을 잡으세요. 구간 밖은 <b>아무것도 아님</b>으로 저장됩니다.
+                손잡이를 움직여 구간을 잡으세요. 구간 밖에서 운동과 다른 자세는 <b>아무것도 아님</b>으로 저장됩니다.
                 {review.clip === null && ' (영상 준비 중이거나 이 브라우저는 영상 미리보기를 지원하지 않습니다)'}
               </div>
               {labelCounts && (
@@ -407,15 +524,19 @@ export default function LearnScreen() {
           </div>
           {markKeys.map((k) => (
               <label key={k} className={`mb-2 block text-sm ${active === k ? 'text-white' : 'text-neutral-400'}`}>
-                <div className="flex justify-between">
+                <div className="flex items-center justify-between">
                   <span>{k === 'bottom' ? '바닥(가장 깊이 굽힌 순간)' : MARK_LABEL[k]}</span>
-                  <span className="font-mono">{((marks[k] ?? 0) / review.fps).toFixed(1)}s</span>
+                  <span className="flex items-center gap-1 font-mono">
+                    <button type="button" onClick={() => nudge(k, -1)} className="rounded bg-white/10 px-2 py-0.5">◀</button>
+                    {((marks[k] ?? 0) / review.fps).toFixed(2)}s
+                    <button type="button" onClick={() => nudge(k, 1)} className="rounded bg-white/10 px-2 py-0.5">▶</button>
+                  </span>
                 </div>
                 <input
                   type="range"
-                  min={0}
-                  max={review.frames.length - 1}
-                  value={marks[k] ?? 0}
+                  min={window.lo}
+                  max={window.hi}
+                  value={Math.min(window.hi, Math.max(window.lo, marks[k] ?? 0))}
                   onPointerDown={() => setActive(k)}
                   onChange={(e) => {
                     setActive(k);
@@ -425,6 +546,16 @@ export default function LearnScreen() {
                 />
               </label>
             ))}
+          {kind === 'rep' && (
+            <div className="mb-2 flex items-center justify-between text-xs text-neutral-500">
+              <span>슬라이더 범위 {(window.lo / review.fps).toFixed(1)}~{(window.hi / review.fps).toFixed(1)}s (선택한 회 주변만)</span>
+              {segments.length > 0 && (
+                <button onClick={removeSegment} className="text-red-300 underline">
+                  {selected + 1}회 삭제
+                </button>
+              )}
+            </div>
+          )}
           <div className="mt-2 grid grid-cols-2 gap-3 text-sm">
             <div>
               <div className="mb-1 text-neutral-400">카메라 각도</div>
@@ -449,8 +580,12 @@ export default function LearnScreen() {
           </div>
           <div className="mt-auto flex gap-2 pt-4 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
             <button onClick={() => setReview(null)} className="flex-1 rounded-2xl bg-white/10 py-4 font-bold">버리기</button>
-            <button onClick={save} disabled={saving} className="flex-[2] rounded-2xl bg-green-500 py-4 text-lg font-bold text-black disabled:opacity-50">
-              {saving ? '저장 중…' : '저장'}
+            <button
+              onClick={save}
+              disabled={saving || !slices.length}
+              className="flex-[2] rounded-2xl bg-green-500 py-4 text-lg font-bold text-black disabled:opacity-50"
+            >
+              {saving ? '저장 중…' : kind === 'rep' ? `저장 (${slices.length}개)` : '저장'}
             </button>
           </div>
         </div>

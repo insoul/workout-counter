@@ -3,7 +3,7 @@ import { JOINTS } from './normalize';
 import type { SampleExercise, SampleHeight, SampleInput, SampleMarks, SampleView } from './types';
 
 export const MIN_FRAMES = 30; // 1초(30fps) — 이보다 짧으면 동작이 아니다
-export const MAX_FRAMES = 600; // 20초
+export const MAX_FRAMES = 1800; // 60초 — 한 녹화에 여러 회를 담는다
 const VIEWS: SampleView[] = ['front', 'left', 'right', 'diagonal'];
 const HEIGHTS: SampleHeight[] = ['floor', 'waist', 'eye'];
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;

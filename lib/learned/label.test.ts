@@ -17,6 +17,15 @@ function pose(d: number): number[] {
   return f;
 }
 
+/** 팔을 머리 위로 들고 다리를 넓게 벌린, 스쿼트 어느 자세와도 다른 포즈 */
+function weird(): number[] {
+  const f = pose(0);
+  const set = (j: number, x: number, y: number) => { f[j * 4] = x; f[j * 4 + 1] = y; };
+  set(13, 0.7, 0.2); set(14, 0.3, 0.2); set(15, 0.75, 0.05); set(16, 0.25, 0.05);
+  set(25, 0.75, 0.7); set(26, 0.25, 0.7); set(27, 0.8, 0.9); set(28, 0.2, 0.9);
+  return f;
+}
+
 /** 30fps: 1초 서기 → 1초 앉기(반 내려감) → 1초 서기 = 90프레임, 가장 깊은 곳은 45번 */
 function squatClip(): number[][] {
   const frames: number[][] = [];
@@ -51,10 +60,16 @@ describe('labelSample', () => {
     expect(count('none')).toBe(0);
     expect(v.every((x) => x.vec.length === 66 && x.sampleId === 's1')).toBe(true);
   });
-  it('구간을 좁히면 밖은 none 이 된다', () => {
+  it('구간 밖이라도 top 자세(서 있기)면 none 으로 두지 않고, 전혀 다른 자세만 none', () => {
+    // 앞 1초는 서 있는 자세(= top) → 라벨 없음
     const v = labelSample({ ...base, marks: { start: 30, end: 60, bottom: 45 } });
-    expect(v.filter((x) => x.state === 'none').length).toBeGreaterThan(0);
-    expect(v.filter((x) => x.state === 'none').every((x) => x.frame < 30 || x.frame > 60)).toBe(true);
+    expect(v.filter((x) => x.state === 'none').length).toBe(0);
+    // 앞 1초를 팔 들고 다리 벌린 자세로 바꾸면 none
+    const odd = squatClip().map((f, i) => (i < 30 ? weird() : f));
+    const w = labelSample({ ...base, frames: odd, marks: { start: 30, end: 60, bottom: 45 } });
+    const nones = w.filter((x) => x.state === 'none');
+    expect(nones.length).toBeGreaterThan(0);
+    expect(nones.every((x) => x.frame < 30)).toBe(true);
   });
   it('0.1초 간격이라 30fps 1초 서기에서 top 은 3프레임 간격, 상태별 상한을 지킨다', () => {
     const v = labelSample({ ...base, marks: defaultMarks(base.frames, 'rep') });
